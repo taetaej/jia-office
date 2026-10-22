@@ -1,0 +1,22 @@
+{
+  "name": "kiro-office-watcher",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "chokidar": "3.6.0",
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.9",
+    "@types/ws": "8.5.10",
+    "tsx": "4.16.2",
+    "typescript": "5.5.3",
+    "vitest": "1.6.1"
+  }
+}

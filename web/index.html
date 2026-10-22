@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kiro Office — Live</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <div class="brand">
+          <span class="brand-mark">◆</span>
+          <span class="brand-title">Kiro Office</span>
+        </div>
+        <div class="session-name" id="session-name">세션 연결 중…</div>
+        <div class="live-badge" id="live-badge" data-live="false">
+          <span class="live-dot"></span><span>LIVE</span>
+        </div>
+      </header>
+
+      <aside id="floor-guide" class="panel">
+        <div class="panel-head">
+          <h2>층별 안내</h2>
+          <span class="panel-sub">FLOOR GUIDE</span>
+        </div>
+        <label class="follow-toggle">
+          <input type="checkbox" id="auto-follow" checked />
+          <span>자동 따라가기 · auto-follow</span>
+        </label>
+        <ul id="floor-list" class="floor-list"></ul>
+      </aside>
+
+      <main id="stage-wrap">
+        <canvas id="office"></canvas>
+        <div id="legend" class="legend">
+          <div class="legend-head">어디서 무엇을 하나 · ROOM GUIDE</div>
+          <div class="legend-grid" id="legend-grid"></div>
+        </div>
+      </main>
+
+      <aside id="activity" class="panel">
+        <div class="panel-head">
+          <h2>활동 로그</h2>
+          <span class="panel-sub">ACTIVITY LOG</span>
+        </div>
+        <ul id="activity-list" class="activity-list"></ul>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

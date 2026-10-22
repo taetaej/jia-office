@@ -1,0 +1,20 @@
+{
+  "name": "kiro-office",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A local isometric office viewer that tails Kiro session logs in real time.",
+  "workspaces": [
+    "watcher",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n watcher,web -c green,cyan \"npm:dev:watcher\" \"npm:dev:web\"",
+    "dev:watcher": "npm -w watcher run dev",
+    "dev:web": "npm -w web run dev",
+    "test": "npm -w watcher test"
+  },
+  "devDependencies": {
+    "concurrently": "8.2.2"
+  }
+}
