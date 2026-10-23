@@ -1,17 +1,20 @@
-/* Kiro Office — dark War-Room palette. Monochrome base; signature green reserved
-   strictly for "the system is pointing here" (LIVE dot, active room, character). */
+/* Jia's Office — warm-minimal palette with black accents. Ivory/cream base,
+   light wood + linen furniture, crisp black for frames/dividers/labels.
+   Signature green reserved strictly for "the system is pointing here"
+   (LIVE dot, active room, character). */
 :root {
-  --bg: 222 18% 7%;
-  --panel: 222 16% 10%;
-  --panel-2: 222 14% 13%;
-  --border: 222 12% 20%;
-  --fg: 210 20% 92%;
-  --muted: 215 12% 60%;
-  --faint: 215 10% 42%;
+  --bg: 38 32% 94%;
+  --panel: 40 36% 97%;
+  --panel-2: 38 24% 91%;
+  --border: 32 14% 82%;
+  --ink: 30 12% 14%;      /* near-black accent / primary text */
+  --fg: 30 12% 18%;
+  --muted: 30 8% 42%;
+  --faint: 32 8% 58%;
   /* signature green = "the system's answer / the live point" */
-  --green: 152 72% 48%;
-  --green-soft: 152 60% 40%;
-  color-scheme: dark;
+  --green: 152 55% 40%;
+  --green-soft: 152 42% 46%;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -45,8 +48,8 @@ body {
   background: hsl(var(--panel));
 }
 .brand { display: flex; align-items: center; gap: 8px; }
-.brand-mark { color: hsl(var(--green)); font-size: 12px; }
-.brand-title { font-weight: 600; letter-spacing: 0.2px; }
+.brand-mark { color: hsl(var(--ink)); font-size: 12px; }
+.brand-title { font-weight: 700; letter-spacing: 0.2px; color: hsl(var(--ink)); }
 .session-name {
   flex: 1;
   color: hsl(var(--muted));
@@ -162,7 +165,7 @@ body {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(1200px 700px at 50% 30%, hsl(222 18% 11%), hsl(var(--bg)) 70%);
+    radial-gradient(1200px 760px at 50% 24%, hsl(42 44% 97%), hsl(36 30% 90%) 72%);
 }
 #office { display: block; width: 100%; height: 100%; }
 

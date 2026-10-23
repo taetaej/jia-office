@@ -72,11 +72,12 @@ export function isoBox(
   gy: number,
   h: number,
   color: RGB,
-  opts: { wTiles?: number; dTiles?: number } = {},
+  opts: { wTiles?: number; dTiles?: number; outline?: string } = {},
 ): void {
   const { c } = ctx;
   const w = opts.wTiles ?? 1;
   const d = opts.dTiles ?? 1;
+  const outline = opts.outline;
   // Four base corners (in grid space) of the footprint.
   const bTop = project(gx, gy, ctx.origin); // back/top corner
   const bRight = project(gx + w, gy, ctx.origin);
@@ -92,6 +93,7 @@ export function isoBox(
   c.closePath();
   c.fillStyle = shade(color, LIGHT.right);
   c.fill();
+  if (outline) { c.strokeStyle = outline; c.lineWidth = 1; c.stroke(); }
 
   // Left face (facing +gy): corners bLeft, bFront.
   c.beginPath();
@@ -142,6 +144,94 @@ export function isoCylinder(
   c.ellipse(base.x, base.y - h, rx, ry, 0, 0, Math.PI * 2);
   c.fillStyle = shade(color, LIGHT.top);
   c.fill();
+}
+
+/**
+ * A soft contact shadow (grounding ellipse) under furniture. Subtle, warm, and
+ * tied to the floor — not a floaty drop shadow. Draw BEFORE the furniture box.
+ */
+export function isoContactShadow(
+  ctx: Ctx,
+  gx: number,
+  gy: number,
+  rx: number,
+  ry: number,
+  alpha = 0.16,
+): void {
+  const { c } = ctx;
+  const p = project(gx + 0.5, gy + 0.5, ctx.origin);
+  c.beginPath();
+  c.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
+  c.fillStyle = `hsl(30 15% 30% / ${alpha})`;
+  c.fill();
+}
+
+/** A flat round rug (isometric ellipse) centered on a tile area. */
+export function isoRoundRug(
+  ctx: Ctx, gx: number, gy: number, rTiles: number, color: RGB,
+): void {
+  const { c } = ctx;
+  const p = project(gx, gy, ctx.origin);
+  c.beginPath();
+  c.ellipse(p.x, p.y, rTiles * TW, rTiles * TH, 0, 0, Math.PI * 2);
+  c.fillStyle = shade(color, LIGHT.top);
+  c.fill();
+  c.strokeStyle = `hsl(${color[0]} ${color[1]}% ${Math.max(0, color[2] - 14)}% / 0.5)`;
+  c.lineWidth = 1;
+  c.stroke();
+}
+
+/** A thin vertical-louver / slat partition along one tile edge (warm minimal). */
+export function isoLouver(
+  ctx: Ctx, gx: number, gy: number, h: number, along: 'x' | 'y', color: RGB, slats = 6,
+): void {
+  const { c } = ctx;
+  const a = project(gx, gy, ctx.origin);
+  const b = along === 'x' ? project(gx + 1, gy, ctx.origin) : project(gx, gy + 1, ctx.origin);
+  for (let i = 0; i <= slats; i++) {
+    const t = i / slats;
+    const x = a.x + (b.x - a.x) * t;
+    const y = a.y + (b.y - a.y) * t;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x, y - h);
+    c.strokeStyle = `hsl(${color[0]} ${color[1]}% ${color[2]}% / 0.85)`;
+    c.lineWidth = 1.5;
+    c.stroke();
+  }
+}
+
+/** A small walking-person silhouette at a tile (for ambient life). */
+export function isoPerson(ctx: Ctx, gx: number, gy: number, color: RGB, bob = 0): void {
+  const { c } = ctx;
+  const p = project(gx, gy, ctx.origin);
+  // shadow
+  c.beginPath();
+  c.ellipse(p.x, p.y + 1, 5, 2.5, 0, 0, Math.PI * 2);
+  c.fillStyle = 'hsl(30 20% 30% / 0.18)';
+  c.fill();
+  // body
+  c.fillStyle = `hsl(${color[0]} ${color[1]}% ${color[2]}%)`;
+  c.beginPath();
+  c.moveTo(p.x - 3, p.y + bob);
+  c.lineTo(p.x + 3, p.y + bob);
+  c.lineTo(p.x + 2, p.y - 13 + bob);
+  c.lineTo(p.x - 2, p.y - 13 + bob);
+  c.closePath();
+  c.fill();
+  // head
+  c.beginPath();
+  c.arc(p.x, p.y - 16 + bob, 3, 0, Math.PI * 2);
+  c.fillStyle = `hsl(${color[0]} ${Math.min(40, color[1] + 10)}% ${Math.min(80, color[2] + 28)}%)`;
+  c.fill();
+}
+
+/** A small desk prop (laptop / mug / paper) as a tiny colored box on a surface. */
+export function isoProp(
+  ctx: Ctx, gx: number, gy: number, z: number, size: number, color: RGB,
+): void {
+  isoBox(ctx, gx, gy, size, color, { wTiles: 0.18, dTiles: 0.14 });
+  void z;
 }
 
 /** A translucent glass panel wall segment (for the meeting / PO rooms). */

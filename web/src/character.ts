@@ -73,20 +73,20 @@ export class Character {
     const p = project(this.pos.gx + 0.5, this.pos.gy + 0.5, ctx.origin);
     const bob = Math.sin(now / 240) * 1.2;
 
-    // soft shadow
+    // soft contact shadow (light-theme friendly)
     c.beginPath();
     c.ellipse(p.x, p.y + 2, 9, 4, 0, 0, Math.PI * 2);
-    c.fillStyle = 'hsl(222 30% 4% / 0.45)';
+    c.fillStyle = 'hsl(30 20% 30% / 0.22)';
     c.fill();
 
     // body (signature green = the live point / self)
-    c.fillStyle = 'hsl(152 60% 42%)';
+    c.fillStyle = 'hsl(152 55% 40%)';
     roundRect(c, p.x - 6, p.y - 22 + bob, 12, 18, 3);
     c.fill();
     // head
     c.beginPath();
     c.arc(p.x, p.y - 26 + bob, 5, 0, Math.PI * 2);
-    c.fillStyle = 'hsl(152 50% 70%)';
+    c.fillStyle = 'hsl(152 45% 66%)';
     c.fill();
 
     if (this.bubbleKind !== 'none') this.drawBubble(ctx, p.x, p.y - 34 + bob, now);
@@ -101,8 +101,8 @@ export class Character {
     const bx = x - w / 2;
     const by = y - h;
 
-    c.fillStyle = 'hsl(210 20% 94%)';
-    c.strokeStyle = 'hsl(222 12% 70%)';
+    c.fillStyle = 'hsl(40 40% 98%)';
+    c.strokeStyle = 'hsl(30 12% 24%)';
     c.lineWidth = 1;
     if (this.bubbleKind === 'think') {
       // thinking cloud: rounded blob + trailing dots
@@ -127,7 +127,7 @@ export class Character {
       c.closePath();
       c.fill();
     }
-    c.fillStyle = 'hsl(222 22% 18%)';
+    c.fillStyle = 'hsl(30 12% 16%)';
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillText(text, x, by + h / 2);

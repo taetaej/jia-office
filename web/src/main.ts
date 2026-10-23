@@ -28,9 +28,9 @@ let connected = false;
 
 // ---- legend -----------------------------------------------------------------
 const LEGEND_SWATCH: Record<RoomId, string> = {
-  archive: 'hsl(222 12% 30%)', dev: 'hsl(210 30% 40%)', server: 'hsl(220 10% 40%)',
-  research: 'hsl(200 30% 45%)', meeting: 'hsl(200 30% 50%)', test: 'hsl(205 50% 50%)',
-  po: 'hsl(45 30% 55%)', lobby: 'hsl(250 12% 45%)',
+  archive: 'hsl(28 36% 52%)', dev: 'hsl(205 60% 55%)', server: 'hsl(220 8% 34%)',
+  research: 'hsl(200 30% 55%)', meeting: 'hsl(205 28% 62%)', test: 'hsl(150 45% 46%)',
+  po: 'hsl(20 40% 48%)', lobby: 'hsl(36 30% 60%)',
 };
 function buildLegend(): void {
   legendGrid.textContent = '';
@@ -192,7 +192,7 @@ function frame(now: number): void {
   character.update(now);
   let drew = false;
   for (const id of ordered) {
-    drawFurniture(ctx, id);
+    drawFurniture(ctx, id, now);
     const r = ROOMS[id];
     if (!drew && character.depthKey <= r.gx + r.gy + r.w + r.h) {
       character.draw(ctx, now);
