@@ -45,7 +45,7 @@ let liveSessionId: string | null = null;
 let activeSessionId = '';
 
 // ---- legend -----------------------------------------------------------------
-const LEGEND_SWATCH: Record<RoomId, string> = {
+const LEGEND_SWATCH: Partial<Record<RoomId, string>> = {
   archive: 'hsl(28 36% 52%)', dev: 'hsl(205 60% 55%)', server: 'hsl(220 8% 34%)',
   research: 'hsl(200 30% 55%)', meeting: 'hsl(205 28% 62%)', test: 'hsl(150 45% 46%)',
   po: 'hsl(20 40% 48%)', lobby: 'hsl(36 30% 60%)',
@@ -59,7 +59,7 @@ function buildLegend(): void {
     cell.dataset.room = id;
     const sw = document.createElement('span');
     sw.className = 'legend-swatch';
-    sw.style.background = LEGEND_SWATCH[id];
+    sw.style.background = LEGEND_SWATCH[id] ?? 'transparent';
     const txt = document.createElement('span');
     txt.textContent = `${r.label} · ${r.sub}`;
     cell.append(sw, txt);
