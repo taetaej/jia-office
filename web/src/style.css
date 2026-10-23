@@ -3,14 +3,14 @@
    Signature green reserved strictly for "the system is pointing here"
    (LIVE dot, active room, character). */
 :root {
-  --bg: 38 32% 94%;
-  --panel: 40 36% 97%;
-  --panel-2: 38 24% 91%;
-  --border: 32 14% 82%;
-  --ink: 30 12% 14%;      /* near-black accent / primary text */
-  --fg: 30 12% 18%;
-  --muted: 30 8% 42%;
-  --faint: 32 8% 58%;
+  --bg: 210 16% 95%;
+  --panel: 210 20% 98%;
+  --panel-2: 210 14% 92%;
+  --border: 214 12% 84%;
+  --ink: 220 10% 13%;      /* near-black accent / primary text (cool) */
+  --fg: 220 10% 18%;
+  --muted: 218 7% 42%;
+  --faint: 216 8% 60%;
   /* signature green = "the system's answer / the live point" */
   --green: 152 55% 40%;
   --green-soft: 152 42% 46%;
@@ -165,7 +165,7 @@ body {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(1200px 760px at 50% 24%, hsl(42 44% 97%), hsl(36 30% 90%) 72%);
+    radial-gradient(1200px 760px at 50% 24%, hsl(210 28% 98%), hsl(212 16% 91%) 72%);
 }
 #office { display: block; width: 100%; height: 100%; }
 
@@ -178,9 +178,9 @@ body {
   position: absolute; top: 0; left: 0;
   white-space: nowrap;
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.2px;
-  color: hsl(30 12% 28%);
-  background: hsl(40 40% 98% / 0.82);
-  border: 1px solid hsl(32 14% 80%);
+  color: hsl(220 10% 28%);
+  background: hsl(210 24% 99% / 0.84);
+  border: 1px solid hsl(214 12% 82%);
   border-radius: 6px;
   padding: 2px 7px;
   backdrop-filter: blur(3px);
@@ -189,6 +189,33 @@ body {
 .room3d-label[data-active="true"] {
   color: hsl(152 55% 30%);
   border-color: hsl(152 45% 55%);
+}
+
+/* cat bubble — thinking (💭) / acting (💬) / tool-fail (💧). Small warm pill
+   projected above the cat; glyph set via textContent only. */
+.cat-bubble {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none;
+  font-size: 15px; line-height: 1;
+  background: hsl(210 24% 99% / 0.92);
+  border: 1px solid hsl(214 12% 82%);
+  border-radius: 10px;
+  padding: 3px 6px;
+  backdrop-filter: blur(3px);
+  transform: translate(-50%, -100%);
+}
+
+/* founder nameplate — premium, readable, black-accent */
+.nameplate {
+  position: absolute; top: 0; left: 0;
+  white-space: nowrap;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  color: hsl(210 20% 97%);
+  background: hsl(var(--ink) / 0.92);
+  border: 1px solid hsl(var(--ink));
+  border-radius: 5px;
+  padding: 2px 8px;
+  transform: translate(-50%, -100%);
 }
 
 .legend {
