@@ -76,6 +76,9 @@ const PROC_HEIGHT: Record<string, number> = {
 interface CatColors { body: string; patchA: string; patchB: string; muzzle: string; eye: string }
 const CALICO: CatColors = { body: '#f3efe9', patchA: '#d98a4e', patchB: '#2a2622', muzzle: '#f3efe9', eye: '#2f4a38' };
 const BOSS_TABBY: CatColors = { body: '#b9bec6', patchA: '#8a929c', patchB: '#6f7782', muzzle: '#f6f3ee', eye: '#d79a2b' };
+// The founder (boss) cat: clean pure-white, soft off-white patches so it reads
+// tidy (not a blotchy tabby), warm amber eyes. Distinct from the calico agent cat.
+const BOSS_WHITE: CatColors = { body: '#fbfaf8', patchA: '#f1eee9', patchB: '#e7e2db', muzzle: '#fdfcfa', eye: '#8a6a3a' };
 
 /** Chibi cat (~0.85 tall at scale 1, facing +z). Returns the body group and its tail. */
 function makeCat(c: CatColors, paws = false): { cat: THREE.Group; tail: THREE.Group } {
@@ -130,8 +133,8 @@ export class Office3D {
   private activeRoom: RoomId = 'lobby';
   private onBed = false;
   private catBedPos = new THREE.Vector3();
-  /** the founder's boss cat, rolling around on the bed */
-  private boss: { roll: THREE.Group; tip: THREE.Group; tail: THREE.Group } | null = null;
+  /** the founder's boss cat, which cycles roll → play → sleep */
+  private boss: { roll: THREE.Group; tip: THREE.Group; cat: THREE.Group; tail: THREE.Group } | null = null;
   private lastNow = 0;
 
   private zoneSlabs = new Map<string, THREE.Mesh>();
@@ -173,7 +176,10 @@ export class Office3D {
     this.buildFloor();
     this.buildExteriorWalls();
     this.buildGlass();
-    this.buildCity();
+    // Exterior city/road backdrop removed — the street looked odd through the
+    // windows. (buildCity() kept below for reference; a sky/sunset backdrop
+    // could replace it later.)
+    // this.buildCity();
     this.buildCharacter();
     this.setupComposer();
     this.setupInput(canvas);
@@ -814,8 +820,10 @@ export class Office3D {
         break;
       }
       case 'bossCat': {
-        // lying on its side across the bed; `roll` rolls it belly-up and back
-        const { cat, tail } = makeCat(BOSS_TABBY, true);
+        // The founder cat cycles through behaviours (roll on bed → sit & play →
+        // curl up & sleep). Built pure-white + crown/bow. `roll` is the pivot
+        // group the render loop animates per behaviour.
+        const { cat, tail } = makeCat(BOSS_WHITE, true);
         // boss accessories: a little gold crown + a pink bow tie
         const gold = mat('#f2c14e', 0.3, 0.5, '#f2c14e', 0.15);
         const crown = new THREE.Group();
@@ -839,7 +847,7 @@ export class Office3D {
         roll.position.y = 0.19;
         roll.scale.setScalar(0.95);
         g.add(roll);
-        this.boss = { roll, tip, tail };
+        this.boss = { roll, tip, cat, tail };
         passive = true;
         break;
       }
@@ -1059,7 +1067,8 @@ export class Office3D {
       el.style.opacity = '0';
       el.style.transition = 'opacity 0.15s';
       this.labelRoot.appendChild(el);
-      this.labels.push({ zone: z.id, el, world: new THREE.Vector3(z.x + z.w / 2, 0.3, z.z + z.d / 2), hoverOnly: true });
+      // Always-on room labels (user wants each room's name visible at all times).
+      this.labels.push({ zone: z.id, el, world: new THREE.Vector3(z.x + z.w / 2, 1.6, z.z + z.d / 2), hoverOnly: false });
     }
     const f = zoneById('founder')!;
     const np = document.createElement('div');
@@ -1182,11 +1191,42 @@ export class Office3D {
     // boss cat: rolls side → belly-up → other side and back, squirming as it goes
     if (this.boss) {
       const t = now / 1000;
-      const sway = Math.sin(t * 1.2);
-      this.boss.roll.rotation.x = sway * 1.35 + Math.sin(t * 4.3) * 0.08;
-      this.boss.roll.position.y = 0.19 + (1 - Math.abs(sway)) * 0.03;
-      this.boss.tip.rotation.y = Math.sin(t * 0.7) * 0.25;
-      this.boss.tail.rotation.z = Math.sin(t * 5) * 0.6;
+      // Behaviour cycle: roll on the bed (8s) → sit up & play (7s) → curl up and
+      // sleep (9s), then repeat. A short eased blend hides the transitions.
+      const ROLL = 8, PLAY = 7, SLEEP = 9, CYCLE = ROLL + PLAY + SLEEP;
+      const p = t % CYCLE;
+      const { roll, tip, cat, tail } = this.boss;
+
+      if (p < ROLL) {
+        // --- 1) LAZING on the bed: lies on its side, gently shifts weight ---
+        // (small, cozy wiggle — NOT a tumble; keep rotation.x tiny)
+        const sway = Math.sin(t * 0.8);
+        roll.rotation.z = Math.PI / 2;              // lying on side (base pose)
+        roll.rotation.x = sway * 0.18;              // subtle roll, no flipping
+        roll.position.y = 0.17 + Math.abs(sway) * 0.015;
+        tip.rotation.y = Math.sin(t * 0.5) * 0.15;  // slow head shift
+        cat.scale.setScalar(0.95);
+        tail.rotation.z = Math.sin(t * 1.6) * 0.3;  // slow tail wave
+      } else if (p < ROLL + PLAY) {
+        // --- 2) PLAYING: sits upright and bats at something, small hops ---
+        const q = p - ROLL;
+        roll.rotation.z = 0;                         // upright
+        roll.rotation.x = 0;
+        roll.position.y = 0.2 + Math.abs(Math.sin(q * 2.6)) * 0.035; // gentle hops
+        tip.rotation.y = Math.sin(q * 1.8) * 0.35;   // swatting left/right
+        cat.scale.setScalar(0.95);
+        tail.rotation.z = Math.sin(q * 6) * 0.6;     // playful tail flicks
+      } else {
+        // --- 3) SLEEPING: curled up, slow breathing, tail barely twitches ---
+        const q = p - ROLL - PLAY;
+        roll.rotation.z = Math.PI / 2;               // lying down
+        roll.rotation.x = 0.1;
+        roll.position.y = 0.15;
+        tip.rotation.y = 0;
+        const breathe = 1 + Math.sin(q * 1.4) * 0.03; // gentle breathing
+        cat.scale.set(0.95 * breathe, 0.95 / breathe, 0.95);
+        tail.rotation.z = Math.sin(q * 0.9) * 0.15;  // lazy twitch
+      }
     }
     if (moved || this.wasMoving) this.renderer.shadowMap.needsUpdate = true;
     this.wasMoving = moved;
@@ -1201,7 +1241,8 @@ export class Office3D {
       const x = (this.tmp.x * 0.5 + 0.5) * el.clientWidth;
       const y = (-this.tmp.y * 0.5 + 0.5) * el.clientHeight;
       l.el.style.transform = `translate(-50%,-100%) translate(${x}px,${y}px)`;
-      if (l.hoverOnly) l.el.style.opacity = this.hoverZone === l.zone ? '1' : '0';
+      // hoverOnly labels fade with hover; always-on labels (room names) stay visible.
+      l.el.style.opacity = l.hoverOnly ? (this.hoverZone === l.zone ? '1' : '0') : '1';
       l.el.dataset.active = String(l.zone === activeZone);
     }
     if (this.bubbleEl.style.display !== 'none') {

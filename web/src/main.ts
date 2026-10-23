@@ -18,24 +18,18 @@ const autoFollow = document.getElementById('auto-follow') as HTMLInputElement;
 
 const office = new Office3D(canvas, roomLabels);
 
-// ---- idle → cat rests on the Founder-office bed -----------------------------
-// Additive wiring only: no ws-protocol/frame/room-set change. After a window of
-// no activity, the cat goes to lie on the bed; any new event wakes it and the
-// existing goToRoom path walks it to the active room.
+// ---- idle → the AGENT cat waits in the LOBBY -------------------------------
+// The agent cat (삼색이) is the worker; when idle it should NOT invade the
+// Founder's private office/bed — that's the boss cat's spot. On idle it simply
+// returns to the lobby and waits; any new event wakes it to the active room.
 const IDLE_MS = 8000;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
-let catResting = false;
 function noteActivity(): void {
   office.setIdle(false);
-  if (catResting) {
-    // was resting on the bed → walk back to the current active room
-    office.goToRoom(currentRoom);
-    catResting = false;
-  }
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    office.setIdle(true);
-    catResting = true;
+    // idle: the agent cat goes back to the lobby to wait (never the founder bed)
+    office.goToRoom('lobby');
   }, IDLE_MS);
 }
 

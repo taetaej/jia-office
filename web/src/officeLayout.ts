@@ -537,13 +537,10 @@ export const NORTH_WALL: WallItem[] = [ // along x on z=0
   { at: 6.6, kind: 'window' }, { at: 11.4, kind: 'window' }, { at: 12.4, kind: 'clock' },
   { at: 14.6, kind: 'window' }, { at: 20.4, kind: 'window' }, { at: 26.0, kind: 'window' },
   { at: 23.9, kind: 'poster', color: PALETTE.pink },
-  { at: 14.0, kind: 'lights', len: 13.5 },
 ];
 export const WEST_WALL: WallItem[] = [ // along z on x=0
   { at: 4.3, kind: 'poster', color: PALETTE.butter }, { at: 5.8, kind: 'window' },
-  { at: 8.25, kind: 'neon', text: "JIA'S OFFICE ♥", color: PALETTE.hotPink },
-  { at: 17.2, kind: 'window' }, { at: 19.2, kind: 'neon', text: 'COFFEE', color: PALETTE.sky },
-  { at: 10.0, kind: 'lights', len: 18 },
+  { at: 17.2, kind: 'window' },
 ];
 export const WINDOW = { width: 1.6, height: 1.3, sill: 0.9 } as const;
 
