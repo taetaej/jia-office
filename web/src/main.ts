@@ -18,6 +18,27 @@ const autoFollow = document.getElementById('auto-follow') as HTMLInputElement;
 
 const office = new Office3D(canvas, roomLabels);
 
+// ---- idle → cat rests on the Founder-office bed -----------------------------
+// Additive wiring only: no ws-protocol/frame/room-set change. After a window of
+// no activity, the cat goes to lie on the bed; any new event wakes it and the
+// existing goToRoom path walks it to the active room.
+const IDLE_MS = 8000;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+let catResting = false;
+function noteActivity(): void {
+  office.setIdle(false);
+  if (catResting) {
+    // was resting on the bed → walk back to the current active room
+    office.goToRoom(currentRoom);
+    catResting = false;
+  }
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    office.setIdle(true);
+    catResting = true;
+  }, IDLE_MS);
+}
+
 let currentRoom: RoomId = 'lobby';
 let sessions: SessionInfo[] = [];
 let liveSessionId: string | null = null;
@@ -138,11 +159,13 @@ const socket = new OfficeSocket({
     sessionNameEl.textContent = active ? active.name : '세션';
     currentRoom = (f.currentRoom in ROOMS ? f.currentRoom : 'lobby') as RoomId;
     office.goToRoom(currentRoom);
+    noteActivity();
     renderFloors();
   },
   onEvent: (f) => {
     addActivity(f.event);
     setRoom(f.currentRoom);
+    noteActivity();
   },
   onSessions: (f) => {
     sessions = f.sessions;

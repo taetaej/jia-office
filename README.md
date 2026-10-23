@@ -114,6 +114,11 @@ one yourself once running:
       --headless=new --window-size=1400,900 --virtual-time-budget=6000 \
       --screenshot=docs/office-screenshot.png http://localhost:5280/
 
+## Credits
+
+3D models: Kenney, CC0. (Furniture Kit + Car Kit; see the `License.txt` in each of
+`web/public/assets/furniture/` and `web/public/assets/vehicles/`.)
+
 ## TODO (next iteration)
 
 PO executive-office interior + sub-agent elevator animation + further polish.

@@ -12,6 +12,12 @@
 
 import * as THREE from 'three';
 import type { RoomId } from './rooms.js';
+import { ModelLoader, tintMeshes } from './models.js';
+
+// ---- Kenney asset URLs (served statically by Vite from web/public) ---------
+// Furniture kit uses camelCase filenames; the vehicle kit uses kebab-case.
+const F = (name: string): string => `/assets/furniture/${name}.glb`;
+const V = (name: string): string => `/assets/vehicles/${name}.glb`;
 
 // ---- palette ---------------------------------------------------------------
 const COL = {
@@ -101,62 +107,6 @@ function cyl(
   return m;
 }
 
-/** A small POTTED indoor plant: little terracotta/white pot + a compact leafy
-    tuft. Deliberately small (desk/corner scale) — NOT a tree. */
-function plant(parent: THREE.Object3D, x: number, z: number, big = false): void {
-  const s = big ? 0.42 : 0.3; // small — corner/floor pot, never a tree
-  // pot
-  cyl(parent, x, z, 0.16, 0.19, 0.22, COL.pot);
-  // compact rounded foliage sitting just above the pot rim
-  const geo = new THREE.IcosahedronGeometry(s, 1);
-  const pm = mat(COL.plant, 0.9);
-  const tuft = new THREE.Mesh(geo, pm);
-  tuft.position.set(x, 0.22 + s * 0.7, z);
-  tuft.scale.set(1, 1.15, 1);
-  tuft.castShadow = true;
-  parent.add(tuft);
-  // one or two small offset leaves for a slightly organic look
-  const l2 = new THREE.Mesh(geo, pm);
-  l2.position.set(x + s * 0.5, 0.22 + s * 0.5, z - s * 0.3);
-  l2.scale.setScalar(0.6);
-  l2.castShadow = true;
-  parent.add(l2);
-}
-
-/** A monitor: black frame + glowing cool-blue screen. */
-function monitor(parent: THREE.Object3D, x: number, z: number, rotY = 0): void {
-  const g = new THREE.Group();
-  const frame = box(g, 0, 0, 0.62, 0.42, 0.05, COL.ink, 0.42);
-  void frame;
-  const screen = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.54, 0.34),
-    new THREE.MeshStandardMaterial({ color: COL.screen, emissive: COL.screen, emissiveIntensity: 0.6, roughness: 0.4 }),
-  );
-  screen.position.set(0, 0.63, 0.031);
-  g.add(screen);
-  box(g, 0, 0, 0.06, 0.2, 0.06, COL.ink, 0.22); // stand
-  g.position.set(x, 0, z);
-  g.rotation.y = rotY;
-  parent.add(g);
-}
-
-/** A desk (oak top on black legs) with optional props. */
-function desk(parent: THREE.Object3D, x: number, z: number, w = 1.3, d = 0.7): void {
-  box(parent, x, z, w, 0.06, d, COL.wood, 0.62);
-  const lx = w / 2 - 0.08, lz = d / 2 - 0.08;
-  for (const [sx, sz] of [[-lx, -lz], [lx, -lz], [-lx, lz], [lx, lz]]) {
-    box(parent, x + sx, z + sz, 0.05, 0.62, 0.05, COL.ink);
-  }
-}
-
-function chair(parent: THREE.Object3D, x: number, z: number): void {
-  box(parent, x, z, 0.42, 0.06, 0.42, COL.linen, 0.42);
-  box(parent, x, z - 0.18, 0.42, 0.44, 0.05, COL.linen, 0.42);
-  for (const [sx, sz] of [[-0.16, -0.16], [0.16, -0.16], [-0.16, 0.16], [0.16, 0.16]]) {
-    box(parent, x + sx, z + sz, 0.04, 0.42, 0.04, COL.ink);
-  }
-}
-
 /** A flat round rug. */
 function rug(parent: THREE.Object3D, x: number, z: number, r: number, color: number): void {
   const m = new THREE.Mesh(
@@ -167,48 +117,6 @@ function rug(parent: THREE.Object3D, x: number, z: number, r: number, color: num
   m.position.set(x, 0.011, z);
   m.receiveShadow = true;
   parent.add(m);
-}
-
-/** An ambient person: capsule body + sphere head, neutral tone. */
-function person(parent: THREE.Object3D, x: number, z: number): THREE.Group {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.4, 4, 8), mat(0x6b6660));
-  body.position.y = 0.42; body.castShadow = true;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 16), mat(COL.skin));
-  head.position.y = 0.78; head.castShadow = true;
-  g.add(body, head);
-  g.position.set(x, 0, z);
-  parent.add(g);
-  return g;
-}
-
-/** A row of thin multicolored book spines standing on a shelf (archive). */
-function bookSpines(parent: THREE.Object3D, x: number, z: number, y: number, n: number): void {
-  const palette = [COL.bookR, COL.bookB, COL.bookG, COL.bookY, COL.bookI];
-  const bw = 0.07;
-  const startX = x - (n * bw) / 2;
-  for (let i = 0; i < n; i++) {
-    const h = 0.26 + (i % 3) * 0.05;
-    box(parent, startX + i * bw + bw / 2, z, bw * 0.82, h, 0.22, palette[i % palette.length], y);
-  }
-}
-
-/** A few faint cool-blue code lines on a monitor face (dev). Thin light strips
-    sitting just in front of the screen plane. */
-function codeLines(parent: THREE.Object3D, x: number, z: number, rotY = 0): void {
-  const g = new THREE.Group();
-  const lineMat = new THREE.MeshStandardMaterial({
-    color: COL.codeLine, emissive: COL.codeLine, emissiveIntensity: 0.5, roughness: 0.5,
-  });
-  const widths = [0.4, 0.28, 0.36, 0.22, 0.32];
-  for (let i = 0; i < widths.length; i++) {
-    const ln = new THREE.Mesh(new THREE.PlaneGeometry(widths[i], 0.02), lineMat);
-    ln.position.set(-0.2 + widths[i] / 2, 0.75 - i * 0.055, 0.033);
-    g.add(ln);
-  }
-  g.position.set(x, 0, z);
-  g.rotation.y = rotY;
-  parent.add(g);
 }
 
 // ---- the Scene -------------------------------------------------------------
@@ -222,9 +130,9 @@ export class Office3D {
   private path: THREE.Vector3[] = [];
   private activeRoom: RoomId = 'lobby';
   private roomFloors = new Map<RoomId, THREE.Mesh>();
-  private people: THREE.Group[] = [];
   private labelRoot: HTMLElement;
   private labels: Array<{ id: RoomId; el: HTMLElement; world: THREE.Vector3 }> = [];
+  private readonly models = new ModelLoader();
 
   constructor(canvas: HTMLCanvasElement, labelRoot: HTMLElement) {
     this.labelRoot = labelRoot;
@@ -247,11 +155,17 @@ export class Office3D {
     this.buildFurniture();
     this.buildCharacter();
     this.resize();
+    // Kenney .glb models stream in asynchronously; the scene already renders
+    // (floors/rugs/cat/server racks/labels built synchronously above). Models
+    // swap in per-room as each file resolves. Fire-and-forget on purpose.
+    void this.loadFurniture();
   }
 
   private buildLighting(): void {
-    this.scene.add(new THREE.HemisphereLight(0xfff5e8, 0x9a948c, 0.75));
-    const key = new THREE.DirectionalLight(0xfff0dc, 1.15);
+    // NEUTRAL / faintly-cool sky so the white floor reads cool-whitish (not
+    // beige). Lifted a touch so the open floor stays bright at the lower angle.
+    this.scene.add(new THREE.HemisphereLight(0xfbfdff, 0xb9bec4, 0.85));
+    const key = new THREE.DirectionalLight(0xfbfdff, 1.1);
     key.position.set(14, 26, 10);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -332,51 +246,34 @@ export class Office3D {
     this.labels.push({ id: 'po', el, world });
   }
 
+  // per-room groups that hold Kenney models (populated async in loadFurniture).
+  private roomGroups = new Map<RoomId, THREE.Group>();
+
+  /** Build the PROCEDURAL, non-furniture content synchronously so the scene
+      renders instantly: rugs, server racks + blinking LEDs, the research globe,
+      the test checklist board, the meeting glass partitions, the po backdrop +
+      HTML nameplate. Real Kenney furniture streams in later via loadFurniture(). */
   private buildFurniture(): void {
     for (const r of ROOMS) {
       const g = new THREE.Group();
       this.scene.add(g);
+      this.roomGroups.set(r.id, g);
       const cx = r.x + r.w / 2, cz = r.z + r.d / 2;
       switch (r.id) {
         case 'archive': {
           rug(g, cx, cz + 0.5, 1.2, COL.rugWarm);
-          // wood bookshelves with multicolored spines on each of 2 shelf rows
-          for (let i = 0; i < 3; i++) {
-            const sx = r.x + 0.9 + i * 1.05;
-            box(g, sx, r.z + 0.5, 0.9, 1.5, 0.4, COL.woodDark); // shelf carcass
-            bookSpines(g, sx, r.z + 0.5, 0.45, 9); // lower shelf
-            bookSpines(g, sx, r.z + 0.5, 0.95, 9); // upper shelf
-          }
-          // reading desk + chair with small props
-          desk(g, cx, cz + 0.7);
-          box(g, cx - 0.2, cz + 0.7, 0.3, 0.02, 0.22, COL.paper, 0.66); // papers
-          cyl(g, cx + 0.35, cz + 0.6, 0.05, 0.05, 0.1, COL.ink, 0.66);  // mug
-          chair(g, cx, cz + 1.15);
-          plant(g, r.x + r.w - 0.5, r.z + r.d - 0.5);
-          this.people.push(person(g, r.x + 0.8, r.z + r.d - 0.8));
           break;
         }
         case 'dev': {
           rug(g, cx, cz, 1.6, COL.rug);
-          // 3 oak desks (black legs) with cool-blue monitors + faint code lines
-          desk(g, cx - 1, cz - 0.3); monitor(g, cx - 1, cz - 0.45); codeLines(g, cx - 1, cz - 0.42);
-          desk(g, cx + 1, cz - 0.3); monitor(g, cx + 1, cz - 0.45); codeLines(g, cx + 1, cz - 0.42);
-          desk(g, cx, cz + 0.9); monitor(g, cx, cz + 0.75, Math.PI); codeLines(g, cx, cz + 0.78, Math.PI);
-          // laptop + mug props
-          box(g, cx - 1.3, cz - 0.25, 0.26, 0.02, 0.2, COL.ink, 0.65);
-          cyl(g, cx + 1.35, cz - 0.2, 0.045, 0.045, 0.09, COL.pot, 0.65);
-          chair(g, cx - 1, cz + 0.1); chair(g, cx + 1, cz + 0.1);
-          plant(g, r.x + r.w - 0.5, r.z + 0.6);
-          this.people.push(person(g, r.x + 0.8, r.z + r.d - 0.8));
-          this.people.push(person(g, cx + 1, cz + 0.2));
           break;
         }
         case 'server': {
+          // KEEP procedural charcoal racks + blinking LEDs (Kenney has no rack).
           for (let i = 0; i < 4; i++) {
             const rx = r.x + 1 + i * 1;
             const rack = box(g, rx, r.z + 1, 0.8, 2.0, 0.6, COL.metal);
             void rack;
-            // blinking LEDs: emissive strip updated per-frame (store refs)
             for (let j = 0; j < 4; j++) {
               const led = new THREE.Mesh(
                 new THREE.BoxGeometry(0.1, 0.06, 0.02),
@@ -387,34 +284,19 @@ export class Office3D {
               this.leds.push(led.material as THREE.MeshStandardMaterial);
             }
           }
-          plant(g, r.x + r.w - 0.5, r.z + r.d - 0.5);
           break;
         }
         case 'research': {
           rug(g, cx, cz + 0.4, 1.3, COL.rug);
-          // black-framed world/map board: thin frame + paper panel
-          box(g, cx, r.z + 0.32, 2.5, 1.35, 0.06, COL.ink);        // frame
-          box(g, cx, r.z + 0.36, 2.2, 1.1, 0.05, COL.glass, 0.12); // map panel (cool tint)
-          // globe on a small stand
+          // KEEP the procedural globe on a small stand.
           box(g, r.x + r.w - 1.2, cz - 0.1, 0.12, 0.3, 0.12, COL.woodDark); // stand
           const globe = new THREE.Mesh(new THREE.SphereGeometry(0.26, 20, 16), mat(COL.glass, 0.4));
           globe.position.set(r.x + r.w - 1.2, 0.56, cz - 0.1); globe.castShadow = true; g.add(globe);
-          desk(g, cx - 0.4, cz + 0.7); chair(g, cx - 0.4, cz + 1.15);
-          box(g, cx - 0.5, cz + 0.7, 0.28, 0.02, 0.2, COL.paper, 0.66); // papers
-          plant(g, r.x + 0.6, r.z + r.d - 0.5);
-          this.people.push(person(g, r.x + r.w - 0.8, r.z + r.d - 0.9));
           break;
         }
         case 'meeting': {
           rug(g, cx, cz, 1.8, COL.rug);
-          // long oak table + chairs
-          desk(g, cx, cz, 2.6, 1.0);
-          for (let i = 0; i < 3; i++) { chair(g, cx - 0.9 + i * 0.9, cz - 0.8); chair(g, cx - 0.9 + i * 0.9, cz + 0.8); }
-          // whiteboard: paper panel in a thin black frame
-          box(g, r.x + 0.45, r.z + 0.32, 1.65, 1.05, 0.05, COL.ink);
-          box(g, r.x + 0.45, r.z + 0.35, 1.45, 0.85, 0.05, COL.paper, 0.1);
-          // waist/chest-high THIN GLASS partitions (partial length, not opaque
-          // walls) — keeps the open view, just hints the meeting zone.
+          // KEEP the waist-high THIN GLASS partitions (open/low only).
           const glassMat = new THREE.MeshStandardMaterial({ color: COL.glass, transparent: true, opacity: 0.28, roughness: 0.1, metalness: 0.0 });
           for (const [gx, gz, gw, gd] of [
             [cx + 1.6, cz - 0.6, 0.04, 1.6] as const, // east glass, partial
@@ -424,69 +306,194 @@ export class Office3D {
             gm.position.set(gx, 0.45, gz); gm.castShadow = false; gm.receiveShadow = false;
             g.add(gm);
           }
-          plant(g, r.x + r.w - 0.5, r.z + r.d - 0.5);
           break;
         }
         case 'test': {
           rug(g, cx, cz + 0.2, 1.4, COL.rug);
-          desk(g, cx, cz + 0.4); chair(g, cx, cz + 0.9);
-          box(g, cx - 0.2, cz + 0.4, 0.26, 0.02, 0.2, COL.ink, 0.65); // laptop
-          // kanban/checklist board (black frame + paper) with tick marks
+          // KEEP the procedural kanban/checklist board (black frame + paper).
           box(g, r.x + 0.55, r.z + 0.3, 1.55, 1.15, 0.05, COL.ink);
           box(g, r.x + 0.55, r.z + 0.33, 1.35, 0.95, 0.05, COL.paper, 0.1);
-          // tiny green-check / red-x ticks (muted, NOT signature green)
           for (let i = 0; i < 4; i++) {
             const ok = i % 2 === 0;
             box(g, r.x + 0.2 + i * 0.1, r.z + 0.34, 0.06, 0.06, 0.02, ok ? COL.checkGreen : COL.checkRed, 0.55 + (i % 2) * 0.18);
           }
-          plant(g, r.x + r.w - 0.5, r.z + 0.6);
-          this.people.push(person(g, r.x + r.w - 0.9, r.z + r.d - 0.9));
           break;
         }
         case 'po': {
-          // FOUNDER office — the nicest zone: larger statement rug
+          // FOUNDER office — the nicest zone: larger statement rug.
           rug(g, cx, cz + 0.2, 2.4, COL.rugWarm);
-          // soft window-view backdrop: a LOW, THIN light panel behind the desk
-          // (never a tall occluding wall)
+          // soft window-view backdrop: a LOW, THIN light panel (never a tall wall).
           box(g, cx, r.z + 0.15, 3.2, 1.0, 0.06, 0xeaf1f6, 0.1);
-          // big executive oak desk with black base + dual cool-blue monitors
-          desk(g, cx, cz - 0.2, 2.6, 1.15);
-          box(g, cx, cz - 0.2, 2.4, 0.5, 0.9, COL.ink); // solid black base
-          monitor(g, cx - 0.55, cz - 0.4); monitor(g, cx + 0.55, cz - 0.4);
-          chair(g, cx, cz + 0.6);
-          // trophy / art shelf
-          box(g, r.x + 0.8, r.z + 0.5, 1.6, 1.1, 0.3, COL.woodDark);
-          cyl(g, r.x + 0.5, r.z + 0.5, 0.07, 0.05, 0.16, COL.bookY, 0.95); // trophy
-          plant(g, r.x + r.w - 0.6, r.z + r.d - 0.6);
-          plant(g, r.x + 0.7, r.z + r.d - 0.7);
-          // nameplate: small dark block on the desk + readable HTML label
-          this.poNameplate = box(g, cx, cz - 0.2, 0.9, 0.12, 0.06, COL.ink, 0.66);
+          // KEEP the existing HTML nameplate pipeline.
           this.addNameplate('JIA · Founder', new THREE.Vector3(cx, 0.95, cz - 0.2));
           break;
         }
         case 'lobby': {
           rug(g, cx, cz, 1.9, COL.rugSage);
-          box(g, cx, cz - 0.6, 1.8, 0.9, 0.7, COL.wood); // central reception desk
-          box(g, cx, cz - 0.6, 1.5, 0.08, 0.55, COL.woodDark, 0.9); // counter top
-          // L-shaped linen sofa + back + cushions
-          box(g, r.x + 0.9, cz + 0.8, 1.8, 0.4, 0.7, COL.linen, 0);      // seat (long)
-          box(g, r.x + 0.9, cz + 0.8, 1.8, 0.35, 0.18, COL.linen, 0.4);  // back
-          box(g, r.x + 0.25, cz + 0.2, 0.55, 0.4, 1.0, COL.linen, 0);    // seat (short, L)
-          box(g, r.x + 0.55, cz + 0.55, 0.45, 0.2, 0.45, COL.cushion, 0.4); // cushion
-          box(g, r.x + 1.3, cz + 0.55, 0.45, 0.2, 0.45, COL.cushion, 0.4);  // cushion
-          box(g, r.x + 0.9, cz + 1.3, 0.7, 0.28, 0.5, COL.woodDark); // coffee table (by sofa)
-          plant(g, r.x + 0.5, r.z + 0.5);
-          plant(g, r.x + r.w - 0.5, r.z + 0.5);
-          this.people.push(person(g, r.x + r.w - 0.9, cz + 0.9)); // keep clear of cat center
           break;
         }
       }
     }
   }
 
+  /** Scale baseline for Kenney furniture. Kenney models are small (a desk is
+      only ~0.73 units wide), so at S=1 they render as tiny specks on the 5x4-tile
+      rooms. Scale up ~2.4x so furniture reads at a believable size. */
+  private readonly S = 2.4;
+
+  /** Stream real Kenney `.glb` furniture into each room group. Fire-and-forget
+      from the constructor; models swap in as each file resolves. Every call is
+      independent so a single failed load never blocks the rest. */
+  private async loadFurniture(): Promise<void> {
+    const jobs: Promise<unknown>[] = [];
+    const place = (url: string, g: THREE.Group, x: number, z: number, rotationY = 0, scale = this.S): Promise<THREE.Group | null> => {
+      const p = this.models.instance(url, { x, z, rotationY, scale, parent: g });
+      jobs.push(p);
+      return p;
+    };
+
+    for (const r of ROOMS) {
+      const g = this.roomGroups.get(r.id)!;
+      const cx = r.x + r.w / 2, cz = r.z + r.d / 2;
+      switch (r.id) {
+        case 'archive': {
+          // bookcases along the back wall + books on them
+          place(F('bookcaseOpen'), g, r.x + 1.1, r.z + 0.5, 0);
+          place(F('bookcaseOpen'), g, r.x + 2.3, r.z + 0.5, 0);
+          place(F('bookcaseOpenLow'), g, r.x + 3.5, r.z + 0.5, 0);
+          place(F('books'), g, r.x + 1.1, r.z + 0.55, 0, 0.8);
+          place(F('books'), g, r.x + 2.3, r.z + 0.55, 0, 0.8);
+          // reading desk + chair
+          place(F('desk'), g, cx, cz + 0.9, Math.PI);
+          place(F('chairDesk'), g, cx, cz + 1.5, 0);
+          place(F('plantSmall1'), g, r.x + r.w - 0.6, r.z + r.d - 0.6, 0, 0.9);
+          break;
+        }
+        case 'dev': {
+          // three workstations: desk + screen + keyboard + mouse + chair
+          const stations: Array<[number, number, number]> = [
+            [cx - 1.3, cz - 0.3, Math.PI],
+            [cx + 1.3, cz - 0.3, Math.PI],
+            [cx, cz + 1.0, 0],
+          ];
+          for (const [sx, sz, rotY] of stations) {
+            const facing = rotY === 0 ? 1 : -1;
+            place(F('desk'), g, sx, sz, rotY);
+            place(F('computerScreen'), g, sx, sz - 0.12 * facing, rotY);
+            place(F('computerKeyboard'), g, sx, sz + 0.15 * facing, rotY, 0.9);
+            place(F('computerMouse'), g, sx + 0.3, sz + 0.15 * facing, rotY, 0.9);
+            place(F('chairDesk'), g, sx, sz + 0.6 * facing, rotY);
+          }
+          place(F('plantSmall2'), g, r.x + r.w - 0.6, r.z + 0.6, 0, 0.9);
+          break;
+        }
+        case 'research': {
+          place(F('desk'), g, cx - 0.3, cz + 0.9, Math.PI);
+          place(F('chairDesk'), g, cx - 0.3, cz + 1.5, 0);
+          place(F('bookcaseOpenLow'), g, r.x + 1.0, r.z + 0.5, 0);
+          place(F('plantSmall3'), g, r.x + 0.7, r.z + r.d - 0.6, 0, 0.9);
+          break;
+        }
+        case 'meeting': {
+          // central table + cushioned modern chairs around it
+          place(F('table'), g, cx, cz, 0, 1.1);
+          const seats: Array<[number, number, number]> = [
+            [cx - 0.9, cz - 0.9, 0], [cx, cz - 0.9, 0], [cx + 0.9, cz - 0.9, 0],
+            [cx - 0.9, cz + 0.9, Math.PI], [cx, cz + 0.9, Math.PI], [cx + 0.9, cz + 0.9, Math.PI],
+          ];
+          for (const [sx, sz, rotY] of seats) place(F('chairModernCushion'), g, sx, sz, rotY);
+          break;
+        }
+        case 'server': {
+          place(F('pottedPlant'), g, r.x + r.w - 0.6, r.z + r.d - 0.6, 0, 0.9);
+          break;
+        }
+        case 'test': {
+          place(F('desk'), g, cx, cz + 0.5, Math.PI);
+          place(F('chairDesk'), g, cx, cz + 1.1, 0);
+          place(F('computerScreen'), g, cx, cz + 0.38, Math.PI);
+          place(F('plantSmall1'), g, r.x + r.w - 0.6, r.z + 0.6, 0, 0.9);
+          break;
+        }
+        case 'lobby': {
+          // reception + lounge seating
+          place(F('deskCorner'), g, cx, cz - 0.7, 0);
+          place(F('loungeSofa'), g, r.x + 1.1, cz + 0.9, 0);
+          place(F('loungeSofaCorner'), g, r.x + 2.3, cz + 0.9, -Math.PI / 2);
+          place(F('tableCoffee'), g, r.x + 1.4, cz + 1.5, 0, 0.9);
+          place(F('plantSmall2'), g, r.x + 0.6, r.z + 0.6, 0, 0.9);
+          place(F('plantSmall3'), g, r.x + r.w - 0.6, r.z + 0.6, 0, 0.9);
+          break;
+        }
+        case 'po': {
+          await this.loadFounderOffice(g, r, cx, cz);
+          break;
+        }
+      }
+    }
+    await Promise.allSettled(jobs);
+  }
+
+  /** The Founder (po) SHOWPIECE: executive desk + chair + dual screens, floor
+      lamp, potted plants, a BED the idle cat lies on, and a BLUE sports car. */
+  private async loadFounderOffice(g: THREE.Group, r: Room3D, cx: number, cz: number): Promise<void> {
+    const S = this.S;
+    // big executive setup
+    await this.models.instance(F('deskCorner'), { x: cx - 0.2, z: cz - 0.4, rotationY: Math.PI, scale: S * 1.15, parent: g });
+    this.models.instance(F('chairDesk'), { x: cx - 0.2, z: cz + 0.3, rotationY: 0, scale: S, parent: g });
+    this.models.instance(F('computerScreen'), { x: cx - 0.7, z: cz - 0.55, rotationY: Math.PI, scale: S, parent: g });
+    this.models.instance(F('computerScreen'), { x: cx + 0.3, z: cz - 0.55, rotationY: Math.PI, scale: S, parent: g });
+    this.models.instance(F('lampRoundFloor'), { x: r.x + 0.6, z: r.z + 0.7, rotationY: 0, scale: S, parent: g });
+    this.models.instance(F('plantSmall1'), { x: r.x + r.w - 0.6, z: r.z + 0.7, rotationY: 0, scale: S * 0.95, parent: g });
+    this.models.instance(F('plantSmall3'), { x: r.x + 0.7, z: r.z + r.d - 0.7, rotationY: 0, scale: S * 0.95, parent: g });
+
+    // BED the cat lies on when idle. Record its rest spot (top-surface center).
+    const bedX = r.x + 1.2, bedZ = r.z + r.d - 1.1, bedRot = Math.PI / 2;
+    await this.models.instance(F('bedSingle'), { x: bedX, z: bedZ, rotationY: bedRot, scale: S * 1.05, parent: g });
+    this.bedRestPos = new THREE.Vector3(bedX, 0.55, bedZ); // mattress-top height
+    this.bedRestRotationY = bedRot;
+
+    // BLUE sports car — parked as a tasteful feature (step 7 recolors it).
+    // The car model is already large (~2.55 units long), so it uses a smaller
+    // fixed scale than the furniture S, not S*scale, or it would fill the room.
+    const car = await this.models.instance(V('sedan-sports'), {
+      x: r.x + r.w - 1.6, z: r.z + r.d - 1.3, rotationY: -Math.PI / 2, scale: 1.4, parent: g,
+    });
+    if (car) this.tintCarBlue(car);
+  }
+
+  /** Recolor the sports car BODY to a tasteful vivid blue (~#2f6ad0). Skips
+      glass/window and small wheel/light meshes so only the painted body reads
+      blue. Materials are cloned (in tintMeshes) so cached instances are safe. */
+  private tintCarBlue(car: THREE.Group): void {
+    // collect candidate body meshes: skip glass/window-named + tiny meshes.
+    const box3 = new THREE.Box3();
+    const size = new THREE.Vector3();
+    tintMeshes(car, 0x2f6ad0, (mesh) => {
+      const name = (mesh.name + ' ' + (Array.isArray(mesh.material) ? '' : (mesh.material?.name ?? ''))).toLowerCase();
+      if (/glass|window|light|wheel|tire|tyre/.test(name)) return false;
+      const matAny = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      const mStd = matAny as THREE.MeshStandardMaterial | undefined;
+      if (mStd && (mStd.transparent || (mStd.opacity !== undefined && mStd.opacity < 0.95))) return false;
+      // skip tiny meshes (wheels/lights) by bounding-box footprint
+      if (mesh.geometry) {
+        mesh.geometry.computeBoundingBox();
+        if (mesh.geometry.boundingBox) {
+          box3.copy(mesh.geometry.boundingBox);
+          box3.getSize(size);
+          if (Math.max(size.x, size.y, size.z) < 0.25) return false;
+        }
+      }
+      return true;
+    });
+  }
+
   private leds: THREE.MeshStandardMaterial[] = [];
-  private poNameplate: THREE.Mesh | null = null;
   private catTail!: THREE.Group;
+  // bed rest spot for the idle cat (set when the Founder-office bed loads).
+  private bedRestPos: THREE.Vector3 | null = null;
+  private bedRestRotationY = 0;
+  private onBed = false;
   private catBody!: THREE.Group; // bobs; glow ring stays floor-locked
   private glowRing!: THREE.Mesh;
   private bubbleEl!: HTMLDivElement;
@@ -579,6 +586,8 @@ export class Office3D {
     g.add(ring);
     this.glowRing = ring;
 
+    // scale the whole cat so it reads ~chair-height next to Kenney furniture.
+    g.scale.setScalar(0.9);
     g.position.copy(this.charPos);
     this.scene.add(g);
     this.character = g;
@@ -607,12 +616,37 @@ export class Office3D {
   /** Move the character to a room, routing via the lobby so it doesn't clip walls. */
   goToRoom(room: RoomId): void {
     if (!ROOM_BY_ID.has(room)) return;
+    this.onBed = false; // any room move wakes the cat
     this.activeRoom = room;
     this.highlightActiveRoom();
     const target = roomCenter(room);
     const lobby = roomCenter('lobby');
     this.path = room === 'lobby' ? [target] : [lobby, target];
     this.charTarget = this.path[0];
+  }
+
+  /** Additive: route the idle cat to the Founder-office BED and lie it down.
+      Reuses the same path/charTarget tween as goToRoom (bypassing lobby routing)
+      and applies a lying-down pose each frame while onBed is true. If the bed
+      hasn't finished loading yet, falls back to the po room center. */
+  restToBed(): void {
+    const target = this.bedRestPos
+      ? this.bedRestPos.clone().setY(0)
+      : roomCenter('po');
+    this.path = [target];
+    this.charTarget = target;
+    this.onBed = true;
+  }
+
+  /** Additive: idle toggle driven by main.ts. true → cat goes to rest on the
+      bed; false → cat gets up (upright pose) and the next goToRoom walks it to
+      the active room. */
+  setIdle(onBed: boolean): void {
+    if (onBed) {
+      this.restToBed();
+    } else {
+      this.onBed = false;
+    }
   }
 
   private highlightActiveRoom(): void {
@@ -663,11 +697,27 @@ export class Office3D {
       }
     }
     this.character.position.copy(this.charPos); // group stays on the floor
-    // idle bob applies to the cat body only; the glow ring stays floor-locked
-    this.catBody.position.y = Math.sin(now / 240) * 0.03;
-    // gentle tail sway (살랑): rotate about the rear pivot, side-to-side too
-    this.catTail.rotation.z = Math.sin(now / 300) * 0.5;
-    this.catTail.rotation.y = Math.sin(now / 520) * 0.3;
+    const arrivedAtBed = this.onBed && this.path.length === 0;
+    if (arrivedAtBed && this.bedRestPos) {
+      // lying-down pose: lift the whole group onto the mattress top, tilt the
+      // body onto its side and tuck it low, face the bed's long axis.
+      this.character.position.y = this.bedRestPos.y;
+      this.character.rotation.y = this.bedRestRotationY;
+      this.catBody.position.y = -0.08;
+      this.catBody.rotation.z = Math.PI / 2 - 0.15; // onto its side
+      this.catBody.rotation.x = 0;
+    } else {
+      // upright: restore pose + gentle idle bob
+      this.character.position.y = 0;
+      this.character.rotation.y = 0;
+      this.catBody.rotation.z = 0;
+      this.catBody.rotation.x = 0;
+      this.catBody.position.y = this.onBed ? 0 : Math.sin(now / 240) * 0.03;
+    }
+    // gentle tail sway (살랑) — kept in both poses. Softer while resting.
+    const tailAmp = arrivedAtBed ? 0.28 : 0.5;
+    this.catTail.rotation.z = Math.sin(now / 300) * tailAmp;
+    this.catTail.rotation.y = Math.sin(now / 520) * (arrivedAtBed ? 0.18 : 0.3);
     void this.charTarget;
     void this.glowRing; void this.activity;
 
