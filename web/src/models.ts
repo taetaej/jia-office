@@ -87,6 +87,7 @@ export function tintMeshes(
     const apply = (m: THREE.Material): THREE.Material => {
       const cloned = m.clone() as THREE.MeshStandardMaterial;
       if ('color' in cloned && cloned.color) cloned.color.copy(tint);
+      cloned.map = null; // a flat tint; the kit colormap would darken it
       return cloned;
     };
     if (Array.isArray(mesh.material)) {

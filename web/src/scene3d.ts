@@ -10,11 +10,12 @@ import { type RoomId, resolveRoom } from './rooms.js';
 import { ModelLoader, tintMeshes } from './models.js';
 import {
   ASSET, CAMERA, CORRIDOR_Z, FLOOR, GLASS, KIT_SCALE, LIGHTING, MATERIAL_DEFAULTS,
-  NORTH_WALL, PALETTE, WALL, WEST_WALL, WINDOW, ZONES,
-  type Dir, type Placement, type WallItem, type ZoneDef,
+  NORTH_WALL, PALETTE, WALL, WEST_WALL, WINDOW, ZONES, CITY_SCALE, STREET, CITY, KIT_BASE,
+  type AssetDef, type Dir, type OutdoorPiece, type Placement, type WallItem, type ZoneDef,
 } from './officeLayout.js';
 
-const F = (name: string): string => `/assets/furniture/${name}.glb`;
+const assetUrl = (def: AssetDef): string => `/assets/${def.kit ?? 'furniture'}/${def.file}.glb`;
+const assetScale = (def: AssetDef, mul?: number): number => KIT_BASE[def.kit ?? 'furniture'] * (mul ?? def.mul ?? 1);
 const V = (name: string): string => `/assets/vehicles/${name}.glb`;
 const DEG = Math.PI / 180;
 const FACE_YAW: Record<Dir, number> = { S: 0, E: 90 * DEG, N: 180 * DEG, W: 270 * DEG };
@@ -69,7 +70,50 @@ const zoneForRoom = (room: string): ZoneDef | undefined => ZONES.find((z) => z.r
 const PROC_HEIGHT: Record<string, number> = {
   serverRack: 2.0, coolingUnit: 1.2, reception: 1.05, podium: 0.1, car: 1.4, globe: 1.0,
   easelScreen: 1.8, deviceStand: 0.2, trophy: 1.1, catBed: 0.14, mug: 0.1,
+  arcade: 1.75, beanBag: 0.55, lavaLamp: 0.32, xmasTree: 2.3, catTree: 1.45, bossCat: 0.6,
 };
+
+interface CatColors { body: string; patchA: string; patchB: string; muzzle: string; eye: string }
+const CALICO: CatColors = { body: '#f3efe9', patchA: '#d98a4e', patchB: '#2a2622', muzzle: '#f3efe9', eye: '#2f4a38' };
+const BOSS_TABBY: CatColors = { body: '#b9bec6', patchA: '#8a929c', patchB: '#6f7782', muzzle: '#f6f3ee', eye: '#d79a2b' };
+
+/** Chibi cat (~0.85 tall at scale 1, facing +z). Returns the body group and its tail. */
+function makeCat(c: CatColors, paws = false): { cat: THREE.Group; tail: THREE.Group } {
+  const cat = new THREE.Group();
+  const body = mat(c.body, 0.8), a = mat(c.patchA, 0.8), b = mat(c.patchB, 0.8);
+  const pink = mat('#dca0a0', 0.7), eye = mat(c.eye, 0.4), muzzle = mat(c.muzzle, 0.8);
+  const m = (geo: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number): THREE.Mesh => {
+    const mm = mesh(geo, material, x, y, z); cat.add(mm); return mm;
+  };
+  m(new THREE.CapsuleGeometry(0.17, 0.26, 6, 14), body, 0, 0.28, 0).scale.set(1, 1, 0.92);
+  m(new THREE.SphereGeometry(0.17, 16, 12), a, 0, 0.37, -0.02).scale.set(1.02, 0.6, 1.0);
+  m(new THREE.SphereGeometry(0.1, 14, 10), b, 0.13, 0.33, 0.06).scale.set(1, 0.7, 1);
+  m(new THREE.SphereGeometry(0.155, 20, 18), body, 0, 0.62, 0.05);
+  m(new THREE.SphereGeometry(0.158, 16, 14), a, -0.06, 0.66, 0.03).scale.set(0.62, 0.8, 0.9);
+  m(new THREE.SphereGeometry(0.158, 16, 14), b, 0.08, 0.68, 0.0).scale.set(0.5, 0.7, 0.85);
+  m(new THREE.ConeGeometry(0.07, 0.12, 3), a, -0.09, 0.78, 0.04).rotation.z = 0.18;
+  m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, -0.09, 0.78, 0.07).rotation.z = 0.18;
+  m(new THREE.ConeGeometry(0.07, 0.12, 3), b, 0.09, 0.78, 0.04).rotation.z = -0.18;
+  m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, 0.09, 0.78, 0.07).rotation.z = -0.18;
+  m(new THREE.SphereGeometry(0.06, 14, 12), muzzle, 0, 0.58, 0.18).scale.set(1.2, 0.8, 0.8);
+  m(new THREE.SphereGeometry(0.02, 10, 8), pink, 0, 0.585, 0.22);
+  m(new THREE.SphereGeometry(0.026, 10, 10), eye, -0.055, 0.645, 0.18);
+  m(new THREE.SphereGeometry(0.026, 10, 10), eye, 0.055, 0.645, 0.18);
+  if (paws) {
+    for (const [x, y, z] of [[-0.1, 0.06, 0.12], [0.1, 0.06, 0.12], [-0.1, 0.06, -0.1], [0.1, 0.06, -0.1], [-0.15, 0.36, 0.12], [0.15, 0.36, 0.12]]) {
+      m(new THREE.SphereGeometry(0.05, 10, 8), muzzle, x, y, z).scale.set(1, 0.8, 1.2);
+    }
+  }
+  const tail = new THREE.Group(); tail.position.set(0, 0.3, -0.14);
+  for (const s of [
+    { mat: a, r: 0.05, h: 0.12, y: 0.06 }, { mat: body, r: 0.045, h: 0.12, y: 0.17 },
+    { mat: a, r: 0.038, h: 0.11, y: 0.27 }, { mat: body, r: 0.03, h: 0.1, y: 0.36 },
+  ]) {
+    tail.add(mesh(new THREE.CapsuleGeometry(s.r, s.h, 4, 8), s.mat, 0, s.y, 0));
+  }
+  tail.rotation.x = -0.5; cat.add(tail);
+  return { cat, tail };
+}
 
 export class Office3D {
   readonly scene = new THREE.Scene();
@@ -86,6 +130,8 @@ export class Office3D {
   private activeRoom: RoomId = 'lobby';
   private onBed = false;
   private catBedPos = new THREE.Vector3();
+  /** the founder's boss cat, rolling around on the bed */
+  private boss: { roll: THREE.Group; tip: THREE.Group; tail: THREE.Group } | null = null;
   private lastNow = 0;
 
   private zoneSlabs = new Map<string, THREE.Mesh>();
@@ -127,7 +173,7 @@ export class Office3D {
     this.buildFloor();
     this.buildExteriorWalls();
     this.buildGlass();
-    this.buildVillage();
+    this.buildCity();
     this.buildCharacter();
     this.setupComposer();
     this.setupInput(canvas);
@@ -180,10 +226,23 @@ export class Office3D {
       shape.quadraticCurveTo(-sw / 2, sd / 2, -sw / 2, sd / 2 - r);
       shape.lineTo(-sw / 2, -sd / 2 + r);
       shape.quadraticCurveTo(-sw / 2, -sd / 2, -sw / 2 + r, -sd / 2);
-      const slab = new THREE.Mesh(
-        new THREE.ShapeGeometry(shape, 6),
-        new THREE.MeshStandardMaterial({ color: new THREE.Color(z.floor), roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1 }),
-      );
+      const slabMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(z.floor), roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1 });
+      if (z.pattern) {
+        // ShapeGeometry UVs are in meters, so one texture tile = 2×2 cells
+        const c = document.createElement('canvas');
+        c.width = c.height = 64;
+        const ctx = c.getContext('2d')!;
+        ctx.fillStyle = z.pattern.a; ctx.fillRect(0, 0, 64, 64);
+        ctx.fillStyle = z.pattern.b; ctx.fillRect(0, 0, 32, 32); ctx.fillRect(32, 32, 32, 32);
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.magFilter = THREE.NearestFilter;
+        tex.repeat.set(1 / (2 * z.pattern.size), 1 / (2 * z.pattern.size));
+        slabMat.map = tex;
+        slabMat.color.set('#ffffff');
+      }
+      const slab = new THREE.Mesh(new THREE.ShapeGeometry(shape, 6), slabMat);
       slab.rotation.x = -Math.PI / 2;
       slab.position.set(z.x + z.w / 2, 0.004, z.z + z.d / 2);
       slab.receiveShadow = true;
@@ -260,18 +319,74 @@ export class Office3D {
         block(d, 0.5, 0.18, 0.01, PALETTE.sage, -0.08, 0.12, 0.035);
         block(d, 0.2, 0.2, 0.01, PALETTE.accent, 0.22, 0.32, 0.035, 0.005);
         d.position.y = 1.3;
-      } else {
-        block(d, 1.6, 0.42, 0.05, '#ffffff', 0, 0, 0, 0.02);
-        block(d, 0.22, 0.22, 0.02, PALETTE.accent, -0.55, 0.1, 0.03, 0.01).rotation.z = Math.PI / 4;
-        block(d, 0.9, 0.07, 0.02, PALETTE.metalDark, 0.12, 0.22, 0.03);
-        block(d, 0.6, 0.05, 0.02, PALETTE.metalMid, 0.0, 0.12, 0.03);
-        d.position.y = 1.7;
+      } else if (it.kind === 'poster') {
+        // pop-art print: a big dot, a zigzag and a frame
+        const bg = it.color ?? PALETTE.pink;
+        block(d, 0.8, 1.05, 0.03, '#ffffff', 0, 0, 0);
+        block(d, 0.7, 0.95, 0.01, bg, 0, 0.05, 0.02);
+        const dot = mesh(new THREE.CircleGeometry(0.2, 32), mat('#ffffff', 0.9), 0.08, 0.68, 0.032, false);
+        d.add(dot);
+        for (let i = 0; i < 5; i++) {
+          const zig = block(d, 0.16, 0.035, 0.005, PALETTE.screen, -0.24 + i * 0.12, 0.28 + (i % 2) * 0.06, 0.034);
+          zig.rotation.z = i % 2 ? -0.5 : 0.5;
+        }
+        block(d, 0.42, 0.05, 0.005, PALETTE.screen, -0.05, 0.14, 0.034);
+        d.position.y = 1.0;
+      } else if (it.kind === 'neon') {
+        d.add(this.neonSign(it.text ?? 'HELLO', it.color ?? PALETTE.hotPink));
+        d.position.y = 1.55;
+      } else if (it.kind === 'lights') {
+        void this.stringLights(axis, it.at, it.len ?? 8);
+        continue;
       }
       if (axis === 'x') d.position.set(it.at, d.position.y, 0.03);
       else { d.position.set(0.03, d.position.y, it.at); d.rotation.y = Math.PI / 2; }
       g.add(d);
     }
     this.scene.add(g);
+  }
+
+  /** A neon sign: glowing text on a clear acrylic board. */
+  private neonSign(text: string, color: string): THREE.Group {
+    const g = new THREE.Group();
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 256;
+    const ctx = c.getContext('2d')!;
+    ctx.font = 'italic 700 128px "Pacifico", "Brush Script MT", "Snell Roundhand", cursive';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = color;
+    for (const blur of [48, 24, 10]) { ctx.shadowBlur = blur; ctx.fillStyle = color; ctx.fillText(text, 512, 132); }
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff7fb'; ctx.fillText(text, 512, 132);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const w = 2.2, h = w / 4;
+    const board = mesh(new THREE.BoxGeometry(w + 0.1, h + 0.06, 0.02),
+      new THREE.MeshStandardMaterial({ color: '#ffffff', transparent: true, opacity: 0.25, roughness: 0.1 }), 0, 0, 0, false);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, depthWrite: false }));
+    face.position.z = 0.015;
+    const glow = new THREE.PointLight(new THREE.Color(color), 0.8, 3, 2);
+    glow.position.set(0, 0, 0.4);
+    g.add(board, face, glow);
+    return g;
+  }
+
+  /** Holiday string lights draped along the top of an exterior wall. */
+  private async stringLights(axis: 'x' | 'z', center: number, len: number): Promise<void> {
+    const def = ASSET.stringLights;
+    const raw = await this.models.measure(assetUrl(def));
+    if (!raw) return;
+    const piece = raw.size.x * assetScale(def);
+    const n = Math.max(1, Math.round(len / piece));
+    for (let i = 0; i < n; i++) {
+      const placed = await this.models.place(assetUrl(def), assetScale(def));
+      if (!placed) continue;
+      this.makeGlow(placed.group, def.glow ?? 0.6);
+      const at = center - (n * piece) / 2 + piece * (i + 0.5);
+      const y = WALL.height - placed.size.y - 0.04;
+      if (axis === 'x') placed.group.position.set(at, y, 0.05);
+      else { placed.group.position.set(0.05, y, at); placed.group.rotation.y = Math.PI / 2; }
+      this.scene.add(placed.group);
+    }
   }
 
   // ---- glass enclosures ---------------------------------------------------------
@@ -324,74 +439,64 @@ export class Office3D {
     }
   }
 
-  // ---- village behind the back walls ----------------------------------------
-  private buildVillage(): void {
-    // grass that fades out radially so the diorama keeps a soft edge
+  // ---- the city behind the back walls ------------------------------------------
+  private buildCity(): void {
+    // pavement that fades out radially around the back corner, so the city has a soft edge
     const tex = (() => {
       const c = document.createElement('canvas');
       c.width = c.height = 256;
       const ctx = c.getContext('2d')!;
       const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 128);
       g.addColorStop(0, 'rgba(255,255,255,1)');
-      g.addColorStop(0.65, 'rgba(255,255,255,0.85)');
+      g.addColorStop(0.6, 'rgba(255,255,255,0.9)');
       g.addColorStop(1, 'rgba(255,255,255,0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, 256, 256);
       return new THREE.CanvasTexture(c);
     })();
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(46, 46),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.grass), alphaMap: tex, transparent: true, depthWrite: false }),
+      new THREE.PlaneGeometry(84, 84),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.pavement), alphaMap: tex, transparent: true, depthWrite: false }),
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(-6, -0.32, -6);
+    ground.position.set(STREET.west, -0.33, STREET.north);
+    ground.renderOrder = -1;
     this.scene.add(ground);
+    void Promise.allSettled(CITY.map((p) => this.placeOutdoor(p))).then(() => { this.renderer.shadowMap.needsUpdate = true; });
+  }
 
-    const mute = (hex: string) => new THREE.Color(hex).lerp(new THREE.Color(PALETTE.clear), 0.5);
-    const outMat = (hex: string) => new THREE.MeshLambertMaterial({ color: mute(hex) });
-    const house = (x: number, z: number, w: number, d: number, h: number, wall: string, roof: string, rotY = 0) => {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), outMat(wall));
-      body.position.y = h / 2;
-      const roofGeo = new THREE.CylinderGeometry(0.01, Math.SQRT1_2 * Math.max(w, d) * 1.05, h * 0.55, 4, 1);
-      roofGeo.rotateY(Math.PI / 4);
-      roofGeo.scale(w / Math.max(w, d), 1, d / Math.max(w, d));
-      const r = new THREE.Mesh(roofGeo, outMat(roof));
-      r.position.y = h + h * 0.275;
-      g.add(body, r);
-      // a couple of windows
-      for (const ox of [-w * 0.25, w * 0.25]) {
-        const win = new THREE.Mesh(new THREE.BoxGeometry(w * 0.18, h * 0.22, 0.02), outMat('#c9d8e6'));
-        win.position.set(ox, h * 0.55, d / 2 + 0.01);
-        g.add(win);
-      }
-      g.position.set(x, -0.3, z);
-      g.rotation.y = rotY;
-      this.scene.add(g);
-    };
-    const tree = (x: number, z: number, s = 1) => {
-      const g = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * s, 0.15 * s, 1.2 * s, 6), outMat('#b59a7d'));
-      trunk.position.y = 0.6 * s;
-      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(1.1 * s, 0), outMat('#9fc19a'));
-      crown.position.y = 1.9 * s;
-      g.add(trunk, crown);
-      g.position.set(x, -0.3, z);
-      this.scene.add(g);
-    };
-    // small, muted houses well behind the walls: they fill the empty top of the
-    // frame without competing with the interior
-    house(3, -8, 3.2, 2.8, 2.6, '#f1e8dc', '#c99c84');
-    house(9.5, -9.5, 3.6, 3, 3.0, '#e6edf3', '#93a8bf');
-    house(17, -8.5, 3, 3, 2.6, '#f3eee6', '#a9bba2');
-    house(24, -10, 3.6, 3.2, 2.9, '#efe4d6', '#c3a58d');
-    house(-8.5, 4, 3, 3.4, 2.7, '#e9eef2', '#9fb0c2');
-    house(-9.5, 12, 3.4, 3.2, 3.0, '#f2e9df', '#c79a83');
-    house(-7, -7, 3.2, 3.2, 3.2, '#eef0f2', '#b8a090');
-    for (const [x, z, s] of [
-      [6.5, -5.5, 0.75], [13.5, -6, 0.85], [20.5, -5.8, 0.8], [27, -6.5, 0.75],
-      [-5.5, 0.5, 0.8], [-6, 8, 0.85], [-5.5, 15.5, 0.75], [-3.5, -4, 0.8], [-11, -3, 0.9],
-    ] as Array<[number, number, number]>) tree(x, z, s);
+  /** Outdoor materials get a haze (a white emissive lift that grows with
+      distance) so the city reads as background and never competes with the interior. */
+  private hazeCache = new Map<string, THREE.Material>();
+  private haze(src: THREE.Material, amount: number, opacity?: number): THREE.Material {
+    const key = `${src.uuid}|${amount}|${opacity ?? 1}`;
+    const cached = this.hazeCache.get(key);
+    if (cached) return cached;
+    const m = (src as THREE.MeshStandardMaterial).clone();
+    m.color.lerp(new THREE.Color(PALETTE.clear), amount * 0.5);
+    m.emissive = new THREE.Color(PALETTE.clear);
+    m.emissiveIntensity = amount;
+    m.roughness = 0.9;
+    m.metalness = 0;
+    if (opacity !== undefined) { m.transparent = true; m.opacity = opacity; m.depthWrite = false; }
+    this.hazeCache.set(key, m);
+    return m;
+  }
+
+  private async placeOutdoor(p: OutdoorPiece): Promise<void> {
+    const placed = await this.models.place(`/assets/${p.kit}/${p.file}.glb`, CITY_SCALE * (p.scale ?? 1));
+    if (!placed) return;
+    const amount = p.haze ?? 0.25;
+    placed.group.traverse((obj) => {
+      const m = obj as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.material = Array.isArray(m.material) ? m.material.map((x) => this.haze(x, amount, p.opacity)) : this.haze(m.material, amount, p.opacity);
+      m.castShadow = false;
+    });
+    // roads sit just under the floor slab so they never z-fight it
+    placed.group.position.set(p.x, p.kit === 'roads' && p.file.startsWith('road') ? -0.32 : -0.3, p.z);
+    placed.group.rotation.y = (p.rot ?? 0) * DEG;
+    this.scene.add(placed.group);
   }
 
   // ---- furniture ---------------------------------------------------------------
@@ -411,8 +516,8 @@ export class Office3D {
     if (asset in PROC_HEIGHT) return PROC_HEIGHT[asset];
     const def = ASSET[asset];
     if (!def) return 0;
-    const raw = await this.models.measure(F(def.file));
-    return raw ? raw.size.y * KIT_SCALE * (def.mul ?? 1) : 0;
+    const raw = await this.models.measure(assetUrl(def));
+    return raw ? raw.size.y * assetScale(def) : 0;
   }
 
   private async placeOne(z: ZoneDef, p: Placement, id: string): Promise<void> {
@@ -432,9 +537,10 @@ export class Office3D {
 
     const def = ASSET[p.asset];
     if (!def) { console.warn('[layout] unknown asset', p.asset); return; }
-    const placed = await this.models.place(F(def.file), KIT_SCALE * (p.mul ?? def.mul ?? 1));
+    const placed = await this.models.place(assetUrl(def), assetScale(def, p.mul));
     if (!placed) return;
-    this.applyPalette(placed.group, def.tint);
+    if (!def.kit || def.kit === 'furniture') this.applyPalette(placed.group, { ...def.tint, ...p.tint });
+    if (def.glow) this.makeGlow(placed.group, def.glow);
     placed.group.position.set(wx, y, wz);
     placed.group.rotation.y = yaw;
     this.scene.add(placed.group);
@@ -448,6 +554,21 @@ export class Office3D {
     this.footprints.push({ id, zone, asset, minX: x - fx / 2, maxX: x + fx / 2, minZ: z - fz / 2, maxZ: z + fz / 2, height, passive });
   }
 
+  /** Self-lit textured models (string lights): the colormap doubles as emissive. */
+  private makeGlow(root: THREE.Object3D, intensity: number): void {
+    root.traverse((obj) => {
+      const m = obj as THREE.Mesh;
+      if (!m.isMesh) return;
+      const src = m.material as THREE.MeshStandardMaterial;
+      const g = src.clone();
+      g.emissive = new THREE.Color('#ffffff');
+      g.emissiveMap = src.map;
+      g.emissiveIntensity = intensity;
+      m.material = g;
+      m.castShadow = false;
+    });
+  }
+
   /** Kenney material name → palette (per-asset tint first, then defaults). */
   private applyPalette(root: THREE.Object3D, tint?: Record<string, string>): void {
     root.traverse((obj) => {
@@ -457,7 +578,7 @@ export class Office3D {
         const name = src.name;
         const color = tint?.[name] ?? MATERIAL_DEFAULTS[name]?.color;
         if (!color) return src; // lamp / glass keep their own look
-        const metal = MATERIAL_DEFAULTS[name]?.metal ?? false;
+        const metal = !tint?.[name] && (MATERIAL_DEFAULTS[name]?.metal ?? false);
         return mat(color, metal ? 0.5 : 0.85, metal ? 0.3 : 0);
       };
       m.material = Array.isArray(m.material) ? m.material.map(remap) : remap(m.material);
@@ -605,6 +726,121 @@ export class Office3D {
         g.add(rim);
         this.catBedPos.set(x, 0.1, z);
         fp = [0.9, 0.9];
+        break;
+      }
+      case 'arcade': {
+        // retro arcade cabinet: pink body, glowing screen, joystick + buttons
+        block(g, 0.7, 1.75, 0.7, PALETTE.hotPink, 0, 0, 0, 0.04);
+        block(g, 0.74, 0.22, 0.72, PALETTE.screen, 0, 1.53, 0, 0.03);
+        const marquee = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.butter), emissive: new THREE.Color(PALETTE.butter), emissiveIntensity: 0.6 });
+        g.add(mesh(new THREE.BoxGeometry(0.6, 0.14, 0.01), marquee, 0, 1.64, 0.365, false));
+        const screen = mesh(new THREE.BoxGeometry(0.52, 0.42, 0.02),
+          new THREE.MeshStandardMaterial({ color: new THREE.Color('#1d2440'), emissive: new THREE.Color('#5f7aa6'), emissiveIntensity: 0.7 }), 0, 1.22, 0.3, false);
+        screen.rotation.x = -0.2;
+        g.add(screen);
+        for (const [cx, cy, col] of [[-0.12, 1.25, PALETTE.mint], [0.1, 1.18, PALETTE.butter], [0.14, 1.3, PALETTE.sky]] as Array<[number, number, string]>) {
+          block(g, 0.06, 0.06, 0.01, col, cx, cy, 0.315);
+        }
+        block(g, 0.62, 0.08, 0.26, PALETTE.screen, 0, 0.92, 0.38, 0.02);
+        g.add(mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 8), mat(PALETTE.metalDark), -0.15, 1.04, 0.4));
+        g.add(mesh(new THREE.SphereGeometry(0.03, 10, 8), mat('#e64a5f', 0.5), -0.15, 1.1, 0.4));
+        for (const bx of [0.05, 0.15, 0.25]) g.add(mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.02, 12), mat([PALETTE.mint, PALETTE.butter, PALETTE.sky][Math.round(bx * 10) % 3], 0.5), bx - 0.05, 1.01, 0.42));
+        fp = [0.7, 0.75];
+        break;
+      }
+      case 'beanBag': {
+        const bag = mesh(new THREE.SphereGeometry(0.45, 24, 16), mat(p.color ?? PALETTE.pink, 0.95), 0, 0.25, 0);
+        bag.scale.set(1, 0.58, 1);
+        const dent = mesh(new THREE.SphereGeometry(0.28, 16, 12), mat(p.color ?? PALETTE.pink, 0.95), 0, 0.45, -0.12);
+        dent.scale.set(1, 0.6, 0.8);
+        g.add(bag, dent);
+        fp = [0.9, 0.9];
+        break;
+      }
+      case 'lavaLamp': {
+        const col = p.color ?? PALETTE.hotPink;
+        g.add(mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.08, 16), mat(PALETTE.metal, 0.4, 0.5), 0, 0.04, 0));
+        const glass = new THREE.MeshStandardMaterial({ color: new THREE.Color(col), emissive: new THREE.Color(col), emissiveIntensity: 0.45, transparent: true, opacity: 0.85 });
+        g.add(mesh(new THREE.CylinderGeometry(0.035, 0.055, 0.2, 16), glass, 0, 0.18, 0, false));
+        g.add(mesh(new THREE.SphereGeometry(0.025, 10, 8), mat('#ffffff', 0.4, 0, '#ffffff', 0.4), 0, 0.15, 0, false));
+        g.add(mesh(new THREE.CylinderGeometry(0.02, 0.035, 0.04, 16), mat(PALETTE.metal, 0.4, 0.5), 0, 0.3, 0));
+        passive = true;
+        break;
+      }
+      case 'xmasTree': {
+        // stacked cones + ornaments + a gold star, on a wrapped pot
+        block(g, 0.5, 0.32, 0.5, '#e64a5f', 0, 0, 0, 0.05);
+        block(g, 0.52, 0.06, 0.08, '#ffffff', 0, 0.12, 0, 0.01);
+        g.add(mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.3, 8), mat('#8a6a4b'), 0, 0.4, 0));
+        const greens = ['#3f7d57', '#468a5f', '#4f9667', '#58a170'];
+        const tiers: Array<[number, number, number]> = [[0.78, 0.7, 0.5], [0.62, 0.62, 0.9], [0.46, 0.55, 1.28], [0.3, 0.46, 1.62]];
+        tiers.forEach(([r, h, y0], i) => {
+          g.add(mesh(new THREE.ConeGeometry(r, h, 10), mat(greens[i], 0.9), 0, y0 + h / 2, 0));
+          const n = 7 - i;
+          for (let k = 0; k < n; k++) {
+            const ang = (k / n) * Math.PI * 2 + i * 0.6;
+            const rr = r * 0.78;
+            const col = [PALETTE.hotPink, PALETTE.butter, PALETTE.sky, '#ffffff', PALETTE.mint][(k + i) % 5];
+            g.add(mesh(new THREE.SphereGeometry(0.05, 10, 8), mat(col, 0.3, 0.2, col, 0.25), Math.cos(ang) * rr, y0 + h * 0.22, Math.sin(ang) * rr, false));
+          }
+        });
+        const starShape = new THREE.Shape();
+        for (let k = 0; k < 10; k++) {
+          const rr = k % 2 ? 0.06 : 0.14, ang = (k / 10) * Math.PI * 2 + Math.PI / 2;
+          k ? starShape.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr) : starShape.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+        }
+        const star = mesh(new THREE.ExtrudeGeometry(starShape, { depth: 0.04, bevelEnabled: false }), mat('#f2c14e', 0.3, 0.4, '#f2c14e', 0.5), 0, 2.22, -0.02, false);
+        star.rotation.y = Math.PI / 4;
+        g.add(star);
+        const glow = new THREE.PointLight(new THREE.Color('#ffd9a0'), 0.7, 3.5, 2);
+        glow.position.set(0, 1.4, 0.6);
+        g.add(glow);
+        fp = [0.7, 0.7]; // the trunk/pot; presents tuck under the skirt
+        break;
+      }
+      case 'catTree': {
+        // cat tower: sisal posts + cushioned platforms + a dangling toy
+        const sisal = mat('#d9c29a', 1), plush = mat(PALETTE.lilac, 0.95), plush2 = mat(PALETTE.pink, 0.95);
+        block(g, 0.8, 0.08, 0.8, PALETTE.lilac, 0, 0, 0, 0.03);
+        for (const [x, z, h] of [[-0.22, -0.22, 0.75], [0.22, 0.2, 1.3]] as Array<[number, number, number]>) {
+          g.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, h, 12), sisal, x, 0.08 + h / 2, z));
+        }
+        const p1 = mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.07, 20), plush2, -0.15, 0.85, -0.15); g.add(p1);
+        const p2 = mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.07, 20), plush, 0.18, 1.4, 0.16); g.add(p2);
+        g.add(mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 20), plush, 0.18, 1.46, 0.16).rotateX(Math.PI / 2));
+        g.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.3, 4), mat('#ffffff'), -0.3, 0.68, -0.15));
+        g.add(mesh(new THREE.SphereGeometry(0.05, 10, 8), mat(PALETTE.butter, 0.6), -0.3, 0.52, -0.15));
+        fp = [0.8, 0.8];
+        break;
+      }
+      case 'bossCat': {
+        // lying on its side across the bed; `roll` rolls it belly-up and back
+        const { cat, tail } = makeCat(BOSS_TABBY, true);
+        // boss accessories: a little gold crown + a pink bow tie
+        const gold = mat('#f2c14e', 0.3, 0.5, '#f2c14e', 0.15);
+        const crown = new THREE.Group();
+        crown.add(mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.06, 12, 1, true), gold, 0, 0, 0));
+        for (let k = 0; k < 5; k++) {
+          const ang = (k / 5) * Math.PI * 2;
+          crown.add(mesh(new THREE.ConeGeometry(0.022, 0.06, 4), gold, Math.cos(ang) * 0.08, 0.055, Math.sin(ang) * 0.08));
+        }
+        crown.position.set(0, 0.8, 0.03); crown.rotation.z = -0.15;
+        cat.add(crown);
+        const bow = mat(PALETTE.hotPink, 0.6);
+        cat.add(mesh(new THREE.ConeGeometry(0.05, 0.08, 4), bow, -0.045, 0.48, 0.17).rotateZ(Math.PI / 2));
+        cat.add(mesh(new THREE.ConeGeometry(0.05, 0.08, 4), bow, 0.045, 0.48, 0.17).rotateZ(-Math.PI / 2));
+        cat.add(mesh(new THREE.SphereGeometry(0.025, 8, 6), bow, 0, 0.48, 0.18));
+        const tip = new THREE.Group();
+        tip.add(cat);
+        tip.rotation.z = Math.PI / 2;     // lie down: head toward −x
+        tip.position.x = 0.42;            // center the body over the pivot
+        const roll = new THREE.Group();
+        roll.add(tip);
+        roll.position.y = 0.19;
+        roll.scale.setScalar(0.95);
+        g.add(roll);
+        this.boss = { roll, tip, tail };
+        passive = true;
         break;
       }
       case 'mug': {
@@ -790,36 +1026,9 @@ export class Office3D {
 
   // ---- character: chibi tri-color cat ----------------------------------------------
   private buildCharacter(): void {
-    const COL = { white: '#f3efe9', ginger: '#d98a4e', black: '#2a2622', pink: '#dca0a0', eye: '#2f4a38' };
     const g = new THREE.Group();
-    const cat = new THREE.Group();
-    const white = mat(COL.white, 0.8), ginger = mat(COL.ginger, 0.8);
-    const black = mat(COL.black, 0.8), pink = mat(COL.pink, 0.7), eyeMat = mat(COL.eye, 0.4);
-    const m = (geo: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number): THREE.Mesh => {
-      const mm = mesh(geo, material, x, y, z); cat.add(mm); return mm;
-    };
-    const body = m(new THREE.CapsuleGeometry(0.17, 0.26, 6, 14), white, 0, 0.28, 0); body.scale.set(1, 1, 0.92);
-    const saddle = m(new THREE.SphereGeometry(0.17, 16, 12), ginger, 0, 0.37, -0.02); saddle.scale.set(1.02, 0.6, 1.0);
-    const shoulder = m(new THREE.SphereGeometry(0.1, 14, 10), black, 0.13, 0.33, 0.06); shoulder.scale.set(1, 0.7, 1);
-    m(new THREE.SphereGeometry(0.155, 20, 18), white, 0, 0.62, 0.05);
-    const hg = m(new THREE.SphereGeometry(0.158, 16, 14), ginger, -0.06, 0.66, 0.03); hg.scale.set(0.62, 0.8, 0.9);
-    const hb = m(new THREE.SphereGeometry(0.158, 16, 14), black, 0.08, 0.68, 0.0); hb.scale.set(0.5, 0.7, 0.85);
-    m(new THREE.ConeGeometry(0.07, 0.12, 3), ginger, -0.09, 0.78, 0.04).rotation.z = 0.18;
-    m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, -0.09, 0.78, 0.07).rotation.z = 0.18;
-    m(new THREE.ConeGeometry(0.07, 0.12, 3), black, 0.09, 0.78, 0.04).rotation.z = -0.18;
-    m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, 0.09, 0.78, 0.07).rotation.z = -0.18;
-    m(new THREE.SphereGeometry(0.06, 14, 12), white, 0, 0.58, 0.18).scale.set(1.2, 0.8, 0.8);
-    m(new THREE.SphereGeometry(0.02, 10, 8), pink, 0, 0.585, 0.22);
-    m(new THREE.SphereGeometry(0.026, 10, 10), eyeMat, -0.055, 0.645, 0.18);
-    m(new THREE.SphereGeometry(0.026, 10, 10), eyeMat, 0.055, 0.645, 0.18);
-    const tail = new THREE.Group(); tail.position.set(0, 0.3, -0.14);
-    for (const s of [
-      { mat: ginger, r: 0.05, h: 0.12, y: 0.06 }, { mat: white, r: 0.045, h: 0.12, y: 0.17 },
-      { mat: ginger, r: 0.038, h: 0.11, y: 0.27 }, { mat: white, r: 0.03, h: 0.1, y: 0.36 },
-    ]) {
-      tail.add(mesh(new THREE.CapsuleGeometry(s.r, s.h, 4, 8), s.mat, 0, s.y, 0));
-    }
-    tail.rotation.x = -0.5; cat.add(tail); this.catTail = tail;
+    const { cat, tail } = makeCat(CALICO);
+    this.catTail = tail;
     g.add(cat); this.catBody = cat;
 
     const decal = new THREE.Mesh(
@@ -969,6 +1178,16 @@ export class Office3D {
     }
     this.catTail.rotation.z = Math.sin(now / 300) * (resting ? 0.28 : 0.5);
     this.catTail.rotation.y = Math.sin(now / 520) * (resting ? 0.18 : 0.3);
+
+    // boss cat: rolls side → belly-up → other side and back, squirming as it goes
+    if (this.boss) {
+      const t = now / 1000;
+      const sway = Math.sin(t * 1.2);
+      this.boss.roll.rotation.x = sway * 1.35 + Math.sin(t * 4.3) * 0.08;
+      this.boss.roll.position.y = 0.19 + (1 - Math.abs(sway)) * 0.03;
+      this.boss.tip.rotation.y = Math.sin(t * 0.7) * 0.25;
+      this.boss.tail.rotation.z = Math.sin(t * 5) * 0.6;
+    }
     if (moved || this.wasMoving) this.renderer.shadowMap.needsUpdate = true;
     this.wasMoving = moved;
 
