@@ -34,6 +34,7 @@ export async function discoverSessions(): Promise<SessionInfo[]> {
     } catch {
       continue;
     }
+    const subs = await workflowSessions(hashDir);
     for (const sessionId of sessDirs) {
       const msgPath = join(hashDir, sessionId, 'messages.jsonl');
       let mtime = 0;
@@ -50,10 +51,48 @@ export async function discoverSessions(): Promise<SessionInfo[]> {
         name,
         hash,
         lastActivity: mtime,
+        ...subs.get(sessionId),
       });
     }
   }
+  // A workflow keeps its parent busy: sub-agent activity counts as the parent's.
+  const byId = new Map(out.map((s) => [s.sessionId, s]));
+  for (const s of out) {
+    const parent = s.parentId ? byId.get(s.parentId) : undefined;
+    if (parent && s.lastActivity > parent.lastActivity) parent.lastActivity = s.lastActivity;
+  }
   out.sort((a, b) => b.lastActivity - a.lastActivity);
+  return out;
+}
+
+/** Workflow sub-agent sessions of one project dir: session id → parent + step.
+    Kiro stores every workflow step as its own sess_* folder; the workflow's
+    sessions.json lists them and workflow-state.json names the parent session. */
+async function workflowSessions(hashDir: string): Promise<Map<string, Pick<SessionInfo, 'parentId' | 'role' | 'workflow'>>> {
+  const out = new Map<string, Pick<SessionInfo, 'parentId' | 'role' | 'workflow'>>();
+  let wfDirs: string[] = [];
+  try {
+    wfDirs = (await fsp.readdir(join(hashDir, 'workflows'), { withFileTypes: true }))
+      .filter((d) => d.isDirectory() && d.name.startsWith('wf_'))
+      .map((d) => d.name);
+  } catch {
+    return out;
+  }
+  for (const wf of wfDirs) {
+    try {
+      const dir = join(hashDir, 'workflows', wf);
+      const state = JSON.parse(await fsp.readFile(join(dir, 'workflow-state.json'), 'utf8')) as { parentSessionId?: unknown; workflowName?: unknown };
+      const list = JSON.parse(await fsp.readFile(join(dir, 'sessions.json'), 'utf8')) as { sessions?: Array<{ sessionId?: unknown; nodeId?: unknown }> };
+      const parentId = typeof state.parentSessionId === 'string' ? state.parentSessionId : undefined;
+      const workflow = typeof state.workflowName === 'string' ? state.workflowName.slice(0, 60) : wf;
+      for (const s of list.sessions ?? []) {
+        if (typeof s.sessionId !== 'string') continue;
+        out.set(s.sessionId, { parentId, workflow, role: typeof s.nodeId === 'string' ? s.nodeId.slice(0, 40) : undefined });
+      }
+    } catch {
+      /* a workflow still being written — pick it up on the next poll */
+    }
+  }
   return out;
 }
 

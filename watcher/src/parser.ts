@@ -3,10 +3,11 @@
 // short labels are produced. Secret-looking values are never surfaced verbatim.
 
 import type { ActivityEvent, RoomId } from './types.js';
-import { roomForPayload, type ClassifyOptions, type RawPayload } from './roomMap.js';
+import { roomForPayload, TEST_HINT, type ClassifyOptions, type RawPayload } from './roomMap.js';
 
 const MAX_LABEL = 80;
 const MAX_QUESTION = 140;
+const MAX_DETAIL = 90;
 
 /** Collapse whitespace, strip control chars, and hard-truncate untrusted text. */
 export function sanitize(input: unknown, max: number): string {
@@ -27,6 +28,50 @@ export function normalizeTs(raw: unknown, receiveTime: number): number {
     if (!Number.isNaN(parsed)) return parsed;
   }
   return receiveTime;
+}
+
+/** Mask values that look like credentials (tokens, keys, `password=...`). */
+export function redact(text: string): string {
+  return text
+    .replace(/\b(sk|pk|rk|ghp|gho|ghs|glpat|xox[abpr])[-_][A-Za-z0-9_-]{8,}/g, '••••')
+    .replace(/\bAKIA[0-9A-Z]{12,}\b/g, '••••')
+    .replace(/\b(eyJ[A-Za-z0-9_-]{10,}\.){2}[A-Za-z0-9_-]{10,}/g, '••••')
+    .replace(/((?:password|passwd|pwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1••••')
+    .replace(/\b[A-Fa-f0-9]{32,}\b/g, '••••');
+}
+
+/** "List Directory" for list_directory: Kiro's title is just the tool name. */
+function isGenericTitle(title: string, toolName: string): boolean {
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z]/g, '');
+  return norm(title) === norm(toolName);
+}
+
+/** Basename of a path-like arg, so bubbles show `scene3d.ts`, not a full path. */
+function baseName(p: unknown): string {
+  return typeof p === 'string' ? p.split(/[\\/]/).filter(Boolean).pop() ?? '' : '';
+}
+
+/** One-line, display-safe summary of what the agent is doing (speech bubble). */
+function detailFor(payload: RawPayload): string | undefined {
+  const clip = (x: unknown) => {
+    const out = sanitize(typeof x === 'string' ? redact(x) : '', MAX_DETAIL);
+    return out || undefined;
+  };
+  if (payload.type === 'tool_call') {
+    const title = typeof payload.title === 'string' ? payload.title : '';
+    const args = payload.args ?? {};
+    if (title && !isGenericTitle(title, payload.toolName ?? '')) return clip(title);
+    if (typeof args.description === 'string' && args.description) return clip(args.description);
+    const target = baseName(args.path ?? args.filePath ?? payload.filePath) || (typeof args.query === 'string' ? args.query : '');
+    return clip(target ? `${title || payload.toolName} · ${target}` : title);
+  }
+  if (payload.type === 'assistant' && payload.operationType !== 'Reasoning' && typeof payload.content === 'string') {
+    // first sentence or line of what the assistant said, without markdown noise
+    const plain = payload.content.replace(/```[\s\S]*?```/g, ' ').replace(/[#*`>_~]+/g, '').trim();
+    const first = plain.split(/(?<=[.!?。])\s|\n/)[0] ?? '';
+    return clip(first);
+  }
+  return undefined;
 }
 
 interface RawLine {
@@ -110,8 +155,23 @@ export function parseLine(
     tool: payload.type === 'tool_call' ? sanitize(payload.toolName, MAX_LABEL) : undefined,
   };
 
+  const detail = detailFor(payload);
+  if (detail) event.detail = detail;
+  if (typeof payload.toolCallId === 'string') event.callId = payload.toolCallId.slice(0, 80);
+  if (payload.type === 'tool_call') {
+    const cmd = typeof payload.args?.command === 'string' ? payload.args.command : '';
+    if (TEST_HINT.test(cmd)) event.tag = 'test';
+    else if (/\bgit\s+(commit|push)\b/.test(cmd)) event.tag = 'commit';
+  }
+  if (payload.type === 'tool_result' && typeof payload.success === 'boolean') event.ok = payload.success;
+  if (payload.type === 'interaction_resolved') {
+    // "accept" / "always-accept" approve; anything else (reject, cancelled) does not
+    const option = typeof payload.selectedOption === 'string' ? payload.selectedOption : '';
+    event.detail = payload.outcome === 'selected' && /accept|allow|approve|yes/i.test(option) ? 'approved' : 'rejected';
+  }
+
   if (payload.type === 'pending_interaction') {
-    event.question = sanitize(payload.question, MAX_QUESTION);
+    event.question = sanitize(typeof payload.question === 'string' ? redact(payload.question) : undefined, MAX_QUESTION);
   }
   return event;
 }

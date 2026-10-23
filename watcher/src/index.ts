@@ -10,7 +10,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import chokidar from 'chokidar';
-import type { ActivityEvent, ClientFrame, ServerFrame, SessionInfo } from './types.js';
+import type { ActivityEvent, ClientFrame, CrewMember, ServerFrame, SessionInfo } from './types.js';
 import {
   discoverSessions,
   messagesPath,
@@ -21,6 +21,7 @@ import { parseLine } from './parser.js';
 import { RingBuffer } from './ringBuffer.js';
 import { RoomState } from './roomState.js';
 import { scanWorkflows } from './workflows.js';
+import { computeCrew } from './crew.js';
 
 const WS_PORT = clampPort(process.env.KO_WS_PORT, 8787);
 const CATCHUP_EVENTS = 50;
@@ -43,8 +44,19 @@ const buffer = new RingBuffer(CAPACITY);
 const roomState = new RoomState();
 const unknownTools = new Set<string>();
 const workflowSeen = new Map<string, string>();
+/** tool_call tags by call id, so the matching tool_result carries them too. */
+const callTags = new Map<string, NonNullable<ActivityEvent['tag']>>();
+const CREW_MS = 1500;
+let crew: CrewMember[] = [];
+let crewJson = '[]';
+let lastCrewAt = 0;
 
 const clients = new Set<WebSocket>();
+
+/** Sessions the FLOOR GUIDE lists: workflow sub-agents live under their parent. */
+function topLevel(): SessionInfo[] {
+  return sessions.filter((s) => !s.parentId);
+}
 
 function send(ws: WebSocket, frame: ServerFrame): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
@@ -64,6 +76,15 @@ function ingest(line: string, sessionId: string, live: boolean): void {
     },
   });
   if (!event) return;
+  if (event.callId) {
+    if (event.kind === 'tool_call' && event.tag) {
+      callTags.set(event.callId, event.tag);
+      if (callTags.size > 500) callTags.delete(callTags.keys().next().value as string);
+    } else if (event.kind === 'tool_result') {
+      const tag = callTags.get(event.callId);
+      if (tag) { event.tag = tag; callTags.delete(event.callId); }
+    }
+  }
   buffer.push(event);
   roomState.apply(event);
   if (live) broadcast({ v: 1, type: 'event', event, currentRoom: roomState.room });
@@ -101,7 +122,7 @@ function catchupFrame(): ServerFrame {
     v: 1,
     type: 'catchup',
     sessionId: activeSessionId ?? '',
-    sessions,
+    sessions: topLevel(),
     liveSessionId,
     currentRoom: roomState.room,
     events: buffer.last(CATCHUP_EVENTS),
@@ -112,8 +133,10 @@ function catchupFrame(): ServerFrame {
 async function poll(): Promise<void> {
   const fresh = await discoverSessions();
   const prevLive = liveSessionId;
+  const prevTop = topLevel().length;
   sessions = fresh;
-  liveSessionId = fresh.length ? fresh[0].sessionId : null;
+  // only top-level sessions are "live"; a running workflow keeps its parent live
+  liveSessionId = topLevel()[0]?.sessionId ?? null;
 
   // Auto-pick the live session on first run.
   if (activeSessionId == null && liveSessionId) {
@@ -137,9 +160,20 @@ async function poll(): Promise<void> {
     }
   }
 
+  // Everyone else in the office (workflow sub-agents, other sessions).
+  if (Date.now() - lastCrewAt > CREW_MS) {
+    lastCrewAt = Date.now();
+    crew = await computeCrew(root, sessions, activeSessionId);
+    const json = JSON.stringify(crew);
+    if (json !== crewJson) {
+      crewJson = json;
+      broadcast({ v: 1, type: 'crew', members: crew });
+    }
+  }
+
   // Notify clients if the session list / live marker changed.
-  if (prevLive !== liveSessionId || fresh.length !== sessions.length) {
-    broadcast({ v: 1, type: 'sessions', sessions, liveSessionId });
+  if (prevLive !== liveSessionId || prevTop !== topLevel().length) {
+    broadcast({ v: 1, type: 'sessions', sessions: topLevel(), liveSessionId });
   }
 }
 
@@ -150,6 +184,7 @@ function startServer(): void {
   wss.on('connection', (ws) => {
     clients.add(ws);
     send(ws, catchupFrame());
+    send(ws, { v: 1, type: 'crew', members: crew });
 
     ws.on('message', async (raw) => {
       let frame: ClientFrame;
@@ -159,7 +194,8 @@ function startServer(): void {
         return;
       }
       if (frame.type === 'select' && typeof frame.sessionId === 'string') {
-        await activateSession(frame.sessionId, true);
+        const picked = sessions.find((x) => x.sessionId === frame.sessionId);
+        await activateSession(picked?.parentId ?? frame.sessionId, true);
         send(ws, catchupFrame());
       }
     });

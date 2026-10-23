@@ -40,6 +40,35 @@ export interface ActivityEvent {
   tool?: string;
   /** Optional truncated+escaped question text for pending_interaction (speech bubble). */
   question?: string;
+  /** Optional one-line summary for the speech bubble: a tool call's title, or the
+      first sentence the assistant said. Truncated, with secret-looking values masked. */
+  detail?: string;
+  /** tool_result: whether the tool call succeeded. */
+  ok?: boolean;
+  /** Notable commands, so the office can react (confetti on a green test run…).
+      Set on the tool_call and copied onto its tool_result. */
+  tag?: 'test' | 'commit';
+  /** tool_call / tool_result correlation id (opaque). */
+  callId?: string;
+}
+
+/** A cat other than the main agent: a workflow sub-agent or another session. */
+export interface CrewMember {
+  /** the member's own session id (stable across updates). */
+  id: string;
+  kind: 'workflow' | 'session';
+  /** display name: the sub-agent name or the session title. */
+  name: string;
+  /** workflow name, for workflow members. */
+  group?: string;
+  status: 'working' | 'idle' | 'done';
+  /** the room its latest activity implies (null = lobby). */
+  room: RoomId | null;
+  mode?: 'thinking' | 'action' | 'say' | 'waiting' | 'done';
+  detail?: string;
+  tool?: string;
+  /** when the current state began (epoch ms). */
+  since: number;
 }
 
 /** Metadata about a discovered session, surfaced in the FLOOR GUIDE. */
@@ -51,8 +80,15 @@ export interface SessionInfo {
   name: string;
   /** Parent hash directory name. */
   hash: string;
-  /** Last-activity epoch ms (file mtime of messages.jsonl). */
+  /** Last-activity epoch ms (file mtime of messages.jsonl). For a top-level
+      session this includes its workflow sub-agents' activity. */
   lastActivity: number;
+  /** Set on workflow sub-agent sessions: the session that ran the workflow. */
+  parentId?: string;
+  /** Sub-agents: the workflow step (node id, e.g. "plan", "code"). */
+  role?: string;
+  /** Sub-agents: the workflow's name. */
+  workflow?: string;
 }
 
 /** Server -> client frames. */
@@ -68,6 +104,7 @@ export type ServerFrame =
     }
   | { v: 1; type: 'event'; event: ActivityEvent; currentRoom: RoomId }
   | { v: 1; type: 'sessions'; sessions: SessionInfo[]; liveSessionId: string | null }
+  | { v: 1; type: 'crew'; members: CrewMember[] }
   | { v: 1; type: 'ping'; t: number };
 
 /** Client -> server frames. */

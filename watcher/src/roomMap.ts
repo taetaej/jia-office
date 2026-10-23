@@ -55,7 +55,7 @@ const TOOL_ROOM: Record<string, RoomId> = {
 };
 
 /** Tools whose shell args, when they mention these, mean a TEST run (beats server). */
-const TEST_HINT = /\bvitest\b|\bplaywright\b|\bjest\b|\be2e\b|npm\s+test|npm\s+run\s+test/i;
+export const TEST_HINT = /\bvitest\b|\bplaywright\b|\bjest\b|\be2e\b|npm\s+test|npm\s+run\s+test/i;
 
 /** Paths that indicate spec/plan writing, which routes fs edits to the meeting room. */
 const SPEC_PATH = /\/specs\/|\/spec\b|\bplan\b|\.kiro\/specs/i;

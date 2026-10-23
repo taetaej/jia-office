@@ -462,7 +462,7 @@ export const ZONES: ZoneDef[] = [
       { asset: 'loungeSofa', rx: 9.6, rz: 3.7, face: 'S', tint: { carpet: PALETTE.pink } },
       { asset: 'pillowMint', rx: 9.0, rz: 3.55, y: 0.42, face: 'S' },
       { asset: 'pillowButter', rx: 10.2, rz: 3.55, y: 0.42, face: 'S' },
-      { asset: 'bear', rx: 9.6, rz: 3.65, y: 0.4, face: 'S' },
+      { asset: 'bear', rx: 9.95, rz: 3.65, y: 0.4, face: 'S' },
       { asset: 'loungeChair', rx: 8.0, rz: 5.0, face: 'E', tint: { carpet: PALETTE.butter } },
       { asset: 'loungeChair', rx: 11.2, rz: 5.0, face: 'W', tint: { carpet: PALETTE.mint } },
       { asset: 'tableCoffee', rx: 9.6, rz: 5.0 },
@@ -532,7 +532,7 @@ export const ZONES: ZoneDef[] = [
 // ---- exterior walls: windows + decor (world coordinates along the wall) -----
 export interface WallItem {
   at: number;
-  kind: 'window' | 'clock' | 'picture' | 'poster' | 'neon' | 'lights';
+  kind: 'window' | 'clock' | 'picture' | 'poster' | 'neon' | 'lights' | 'elevator';
   text?: string;
   color?: string;
   /** lights: run length along the wall. */
@@ -545,9 +545,11 @@ export const NORTH_WALL: WallItem[] = [ // along x on z=0
 ];
 export const WEST_WALL: WallItem[] = [ // along z on x=0
   { at: 4.3, kind: 'poster', color: PALETTE.butter }, { at: 5.8, kind: 'window' },
+  { at: 8.25, kind: 'elevator' }, // end of the main corridor: workflow sub-agents arrive here
   { at: 17.2, kind: 'window' },
 ];
 export const WINDOW = { width: 1.6, height: 1.3, sill: 0.9 } as const;
+export const ELEVATOR = { width: 1.3, height: 2.15, depth: 1.4 } as const;
 
 // ---- the city behind the back walls -----------------------------------------
 // Kenney City kits share a tile scale of 1 unit = one road lane, so they get

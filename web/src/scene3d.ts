@@ -8,9 +8,12 @@ import { EffectComposer, RenderPass, EffectPass, SMAAEffect, SMAAPreset } from '
 import { N8AOPostPass } from 'n8ao';
 import { type RoomId, resolveRoom } from './rooms.js';
 import { ModelLoader, tintMeshes } from './models.js';
+import { CrewCat, Hud, blink, closeEyes, coatFor, greetPose, resetPose, sleepPose, type BubbleInfo, type CatColors, type CatParts, type Seat } from './crew.js';
+import type { CrewMember } from './socket.js';
+export type { BubbleInfo } from './crew.js';
 import {
-  ASSET, CAMERA, CORRIDOR_Z, FLOOR, GLASS, KIT_SCALE, LIGHTING, MATERIAL_DEFAULTS,
-  NORTH_WALL, PALETTE, WALL, WEST_WALL, WINDOW, ZONES, CITY_SCALE, STREET, CITY, KIT_BASE,
+  ASSET, CAMERA, CORRIDOR2_X, CORRIDOR_Z, FLOOR, GLASS, KIT_SCALE, LIGHTING, MATERIAL_DEFAULTS,
+  ELEVATOR, NORTH_WALL, PALETTE, WALL, WEST_WALL, WINDOW, ZONES, CITY_SCALE, STREET, CITY, KIT_BASE,
   type AssetDef, type Dir, type OutdoorPiece, type Placement, type WallItem, type ZoneDef,
 } from './officeLayout.js';
 
@@ -73,37 +76,52 @@ const PROC_HEIGHT: Record<string, number> = {
   arcade: 1.75, beanBag: 0.55, lavaLamp: 0.32, xmasTree: 2.3, catTree: 1.45, bossCat: 0.6,
 };
 
-interface CatColors { body: string; patchA: string; patchB: string; muzzle: string; eye: string }
 const CALICO: CatColors = { body: '#f3efe9', patchA: '#d98a4e', patchB: '#2a2622', muzzle: '#f3efe9', eye: '#2f4a38' };
 const BOSS_TABBY: CatColors = { body: '#b9bec6', patchA: '#8a929c', patchB: '#6f7782', muzzle: '#f6f3ee', eye: '#d79a2b' };
 // The founder (boss) cat: clean pure-white, soft off-white patches so it reads
 // tidy (not a blotchy tabby), warm amber eyes. Distinct from the calico agent cat.
 const BOSS_WHITE: CatColors = { body: '#fbfaf8', patchA: '#f1eee9', patchB: '#e7e2db', muzzle: '#fdfcfa', eye: '#8a6a3a' };
 
-/** Chibi cat (~0.85 tall at scale 1, facing +z). Returns the body group and its tail. */
-function makeCat(c: CatColors, paws = false): { cat: THREE.Group; tail: THREE.Group } {
+/** Chibi cat (~0.85 tall at scale 1, facing +z). The head (with eyes) and the
+    two front paws are separate so poses can tilt, blink, wave and knead. */
+function makeCat(c: CatColors, feet = false): CatParts {
   const cat = new THREE.Group();
+  const head = new THREE.Group();
+  head.position.set(0, 0.5, 0.02); // pivot at the neck
+  cat.add(head);
   const body = mat(c.body, 0.8), a = mat(c.patchA, 0.8), b = mat(c.patchB, 0.8);
   const pink = mat('#dca0a0', 0.7), eye = mat(c.eye, 0.4), muzzle = mat(c.muzzle, 0.8);
-  const m = (geo: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number): THREE.Mesh => {
-    const mm = mesh(geo, material, x, y, z); cat.add(mm); return mm;
+  const m = (geo: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = cat): THREE.Mesh => {
+    const mm = mesh(geo, material, x, y, z);
+    if (parent === head) mm.position.sub(head.position);
+    parent.add(mm);
+    return mm;
   };
   m(new THREE.CapsuleGeometry(0.17, 0.26, 6, 14), body, 0, 0.28, 0).scale.set(1, 1, 0.92);
   m(new THREE.SphereGeometry(0.17, 16, 12), a, 0, 0.37, -0.02).scale.set(1.02, 0.6, 1.0);
   m(new THREE.SphereGeometry(0.1, 14, 10), b, 0.13, 0.33, 0.06).scale.set(1, 0.7, 1);
-  m(new THREE.SphereGeometry(0.155, 20, 18), body, 0, 0.62, 0.05);
-  m(new THREE.SphereGeometry(0.158, 16, 14), a, -0.06, 0.66, 0.03).scale.set(0.62, 0.8, 0.9);
-  m(new THREE.SphereGeometry(0.158, 16, 14), b, 0.08, 0.68, 0.0).scale.set(0.5, 0.7, 0.85);
-  m(new THREE.ConeGeometry(0.07, 0.12, 3), a, -0.09, 0.78, 0.04).rotation.z = 0.18;
-  m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, -0.09, 0.78, 0.07).rotation.z = 0.18;
-  m(new THREE.ConeGeometry(0.07, 0.12, 3), b, 0.09, 0.78, 0.04).rotation.z = -0.18;
-  m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, 0.09, 0.78, 0.07).rotation.z = -0.18;
-  m(new THREE.SphereGeometry(0.06, 14, 12), muzzle, 0, 0.58, 0.18).scale.set(1.2, 0.8, 0.8);
-  m(new THREE.SphereGeometry(0.02, 10, 8), pink, 0, 0.585, 0.22);
-  m(new THREE.SphereGeometry(0.026, 10, 10), eye, -0.055, 0.645, 0.18);
-  m(new THREE.SphereGeometry(0.026, 10, 10), eye, 0.055, 0.645, 0.18);
-  if (paws) {
-    for (const [x, y, z] of [[-0.1, 0.06, 0.12], [0.1, 0.06, 0.12], [-0.1, 0.06, -0.1], [0.1, 0.06, -0.1], [-0.15, 0.36, 0.12], [0.15, 0.36, 0.12]]) {
+  m(new THREE.SphereGeometry(0.155, 20, 18), body, 0, 0.62, 0.05, head);
+  m(new THREE.SphereGeometry(0.158, 16, 14), a, -0.06, 0.66, 0.03, head).scale.set(0.62, 0.8, 0.9);
+  m(new THREE.SphereGeometry(0.158, 16, 14), b, 0.08, 0.68, 0.0, head).scale.set(0.5, 0.7, 0.85);
+  m(new THREE.ConeGeometry(0.07, 0.12, 3), a, -0.09, 0.78, 0.04, head).rotation.z = 0.18;
+  m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, -0.09, 0.78, 0.07, head).rotation.z = 0.18;
+  m(new THREE.ConeGeometry(0.07, 0.12, 3), b, 0.09, 0.78, 0.04, head).rotation.z = -0.18;
+  m(new THREE.ConeGeometry(0.035, 0.07, 3), pink, 0.09, 0.78, 0.07, head).rotation.z = -0.18;
+  m(new THREE.SphereGeometry(0.06, 14, 12), muzzle, 0, 0.58, 0.18, head).scale.set(1.2, 0.8, 0.8);
+  m(new THREE.SphereGeometry(0.02, 10, 8), pink, 0, 0.585, 0.22, head);
+  const eyes = [
+    m(new THREE.SphereGeometry(0.026, 10, 10), eye, -0.055, 0.645, 0.18, head),
+    m(new THREE.SphereGeometry(0.026, 10, 10), eye, 0.055, 0.645, 0.18, head),
+  ];
+  // front paws (little "hands" on the chest) — every cat has them
+  const paws = [-1, 1].map((sx) => {
+    const pw = m(new THREE.SphereGeometry(0.048, 10, 8), muzzle, sx * 0.1, 0.2, 0.13);
+    pw.scale.set(1, 0.85, 1.15);
+    pw.userData.rest = pw.position.clone();
+    return pw;
+  });
+  if (feet) {
+    for (const [x, y, z] of [[-0.1, 0.05, 0.1], [0.1, 0.05, 0.1], [-0.1, 0.05, -0.1], [0.1, 0.05, -0.1]]) {
       m(new THREE.SphereGeometry(0.05, 10, 8), muzzle, x, y, z).scale.set(1, 0.8, 1.2);
     }
   }
@@ -115,8 +133,39 @@ function makeCat(c: CatColors, paws = false): { cat: THREE.Group; tail: THREE.Gr
     tail.add(mesh(new THREE.CapsuleGeometry(s.r, s.h, 4, 8), s.mat, 0, s.y, 0));
   }
   tail.rotation.x = -0.5; cat.add(tail);
-  return { cat, tail };
+  return { cat, tail, head, eyes, paws };
 }
+
+/** Lighting through the day: hour → look. Interpolated between keys. */
+interface TimeLook { bg: string; sky: string; ground: string; hemi: number; key: string; keyI: number; exposure: number; night: number; win: string }
+const TIME_KEYS: Array<[number, TimeLook]> = [
+  [0, { bg: '#1e2433', sky: '#8fa3d6', ground: '#3a4258', hemi: 0.8, key: '#a9b8e8', keyI: 0.35, exposure: 1.1, night: 1, win: '#22304d' }],
+  [5.5, { bg: '#1e2433', sky: '#8fa3d6', ground: '#3a4258', hemi: 0.8, key: '#a9b8e8', keyI: 0.35, exposure: 1.1, night: 1, win: '#22304d' }],
+  [6.8, { bg: '#f1e9ee', sky: '#ffe6dc', ground: '#c9cbd6', hemi: 1.25, key: '#ffc9a8', keyI: 0.9, exposure: 1.0, night: 0.25, win: '#f5d3c4' }],
+  [8.5, { bg: '#f4f5f7', sky: '#ffffff', ground: '#cdd2da', hemi: 1.6, key: '#fff6ec', keyI: 1.3, exposure: 1.05, night: 0, win: '#d6e6f4' }],
+  [16.5, { bg: '#f4f5f7', sky: '#ffffff', ground: '#cdd2da', hemi: 1.6, key: '#fff6ec', keyI: 1.3, exposure: 1.05, night: 0, win: '#d6e6f4' }],
+  [18, { bg: '#f6e6d9', sky: '#ffe0c0', ground: '#c9c0cc', hemi: 1.35, key: '#ffad6b', keyI: 1.2, exposure: 1.0, night: 0.15, win: '#f7bf8c' }],
+  [19.3, { bg: '#4a4867', sky: '#c9b5e3', ground: '#6b6a86', hemi: 1.0, key: '#b49ad6', keyI: 0.55, exposure: 1.05, night: 0.65, win: '#7c6aa8' }],
+  [20.5, { bg: '#1e2433', sky: '#8fa3d6', ground: '#3a4258', hemi: 0.8, key: '#a9b8e8', keyI: 0.35, exposure: 1.1, night: 1, win: '#22304d' }],
+  [24, { bg: '#1e2433', sky: '#8fa3d6', ground: '#3a4258', hemi: 0.8, key: '#a9b8e8', keyI: 0.35, exposure: 1.1, night: 1, win: '#22304d' }],
+];
+
+function lookAt(hours: number): TimeLook {
+  const h = ((hours % 24) + 24) % 24;
+  let i = 0;
+  while (i < TIME_KEYS.length - 2 && TIME_KEYS[i + 1][0] <= h) i++;
+  const [h0, a] = TIME_KEYS[i], [h1, b] = TIME_KEYS[i + 1];
+  const t = h1 > h0 ? (h - h0) / (h1 - h0) : 0;
+  const c = (x: string, y: string) => '#' + new THREE.Color(x).lerp(new THREE.Color(y), t).getHexString();
+  const n = (x: number, y: number) => x + (y - x) * t;
+  return {
+    bg: c(a.bg, b.bg), sky: c(a.sky, b.sky), ground: c(a.ground, b.ground), hemi: n(a.hemi, b.hemi),
+    key: c(a.key, b.key), keyI: n(a.keyI, b.keyI), exposure: n(a.exposure, b.exposure), night: n(a.night, b.night), win: c(a.win, b.win),
+  };
+}
+
+/** The main street door crew cats arrive by and leave through (front of the side corridor). */
+const DOOR = new THREE.Vector3(18, 0, 19.7);
 
 export class Office3D {
   readonly scene = new THREE.Scene();
@@ -127,6 +176,10 @@ export class Office3D {
 
   private character!: THREE.Group;
   private catBody!: THREE.Group;
+  private agentParts!: CatParts;
+  /** where the agent naps when there is nothing to do (the lobby sofa) */
+  private restSpot = new THREE.Vector3(14.6, 0.44, 13.2);
+  private restYaw = 0;
   private catTail!: THREE.Group;
   private charPos = new THREE.Vector3();
   private path: THREE.Vector3[] = [];
@@ -134,7 +187,8 @@ export class Office3D {
   private onBed = false;
   private catBedPos = new THREE.Vector3();
   /** the founder's boss cat (upright) playing with a ball */
-  private boss: { roll: THREE.Group; tip: THREE.Group; cat: THREE.Group; tail: THREE.Group; ball: THREE.Mesh } | null = null;
+  private boss: { roll: THREE.Group; tip: THREE.Group; cat: THREE.Group; tail: THREE.Group; ball: THREE.Mesh; root: THREE.Group; parts: CatParts } | null = null;
+  private bossPhase = '';
   private lastNow = 0;
 
   private zoneSlabs = new Map<string, THREE.Mesh>();
@@ -143,7 +197,29 @@ export class Office3D {
 
   private labelRoot: HTMLElement;
   private labels: Array<{ zone: string; el: HTMLElement; world: THREE.Vector3; hoverOnly: boolean }> = [];
-  private bubbleEl!: HTMLDivElement;
+  private agentHud!: Hud;
+  // crew: workflow sub-agents + other sessions
+  private seats: Seat[] = [];
+  private seatTaken = new Map<string, string>();
+  private crew = new Map<string, CrewCat & { leaveAt?: number; spawnAt: number }>();
+  // reactions
+  private sweat: { mesh: THREE.Mesh; t0: number } | null = null;
+  private confetti: { mesh: THREE.InstancedMesh; pos: THREE.Vector3[]; vel: THREE.Vector3[]; spin: THREE.Vector3[]; t0: number } | null = null;
+  private ledFlashUntil = 0;
+  // time of day
+  private hemi!: THREE.HemisphereLight;
+  private key!: THREE.DirectionalLight;
+  private windowMats: THREE.MeshStandardMaterial[] = [];
+  private lampMats = new Set<THREE.MeshStandardMaterial>();
+  private fixedHour: number | null = null;
+  // boss cat approvals
+  private bossMode: 'play' | 'toDesk' | 'review' | 'stamp' | 'toBed' = 'play';
+  private bossPath: THREE.Vector3[] = [];
+  private bossPos = new THREE.Vector3();
+  private bossHome: THREE.Vector3 | null = null;
+  private bossUntil = 0;
+  private bossHud!: Hud;
+  private stamp: { root: THREE.Group; seal: THREE.Mesh; tool: THREE.Group } | null = null;
   private zoom = 1.0;
   private zoomTarget = 1.0;
   private pan = new THREE.Vector2(0, 0);
@@ -185,6 +261,11 @@ export class Office3D {
     this.resize();
     new ResizeObserver(() => this.resize()).observe(canvas.parentElement!);
 
+    this.buildSeats();
+    const fixed = new URLSearchParams(location.search).get('time');
+    if (fixed && /^\d{1,2}(:\d{2})?$/.test(fixed)) { const [hh, mm = '0'] = fixed.split(':'); this.fixedHour = Number(hh) + Number(mm) / 60; }
+    this.applyTime();
+    setInterval(() => this.applyTime(), 60_000);
     void this.buildFurniture();
     (window as unknown as { __office?: Office3D }).__office = this;
   }
@@ -192,7 +273,8 @@ export class Office3D {
   // ---- lighting ---------------------------------------------------------------
   private buildLighting(): void {
     const L = LIGHTING;
-    this.scene.add(new THREE.HemisphereLight(new THREE.Color(L.hemi.sky), new THREE.Color(L.hemi.ground), L.hemi.intensity));
+    this.hemi = new THREE.HemisphereLight(new THREE.Color(L.hemi.sky), new THREE.Color(L.hemi.ground), L.hemi.intensity);
+    this.scene.add(this.hemi);
     const key = new THREE.DirectionalLight(new THREE.Color(L.dir.color), L.dir.intensity);
     const c = FLOOR.center;
     key.position.set(c.x + L.dir.offset.x, L.dir.offset.y, c.z + L.dir.offset.z);
@@ -205,6 +287,7 @@ export class Office3D {
     const e = L.dir.extent;
     Object.assign(key.shadow.camera, { left: -e, right: e, top: e, bottom: -e, near: 1, far: 90 });
     this.scene.add(key, key.target);
+    this.key = key;
   }
 
   // ---- floor + zone slabs -------------------------------------------------------
@@ -278,9 +361,17 @@ export class Office3D {
       g.add(m3);
       return m3;
     };
-    const windows = items.filter((i) => i.kind === 'window').sort((a, b) => a.at - b.at);
+    const windows = items.filter((i) => i.kind === 'window' || i.kind === 'elevator').sort((a, b) => a.at - b.at);
     let cursor = start;
     for (const win of windows) {
+      if (win.kind === 'elevator') {
+        const a = win.at - ELEVATOR.width / 2, b = win.at + ELEVATOR.width / 2;
+        seg(cursor, a, 0, H);
+        seg(a, b, ELEVATOR.height, H);
+        this.buildElevator(axis, win.at);
+        cursor = b;
+        continue;
+      }
       const a = win.at - WINDOW.width / 2, b = win.at + WINDOW.width / 2;
       seg(cursor, a, 0, H);
       seg(a, b, 0, WINDOW.sill);
@@ -289,6 +380,7 @@ export class Office3D {
       const glass = new THREE.MeshStandardMaterial({
         color: new THREE.Color(PALETTE.windowGlass), transparent: true, opacity: 0.22, roughness: 0.1, depthWrite: false,
       });
+      this.windowMats.push(glass);
       const pane = seg(a, b, WINDOW.sill, WINDOW.sill + WINDOW.height, glass, 0.02);
       if (pane) pane.castShadow = false;
       const fm = mat(PALETTE.frame, 0.7), ft = 0.05;
@@ -304,11 +396,16 @@ export class Office3D {
     const cap = mat(PALETTE.wallCap, 0.8);
     seg(start, end, H, H + 0.06, cap, T + 0.04);
     // skirting
-    seg(0, end, 0, 0.08, mat(PALETTE.wallCap, 0.8), 0.02, T / 2 + 0.01);
+    let skirt = 0;
+    for (const it of items.filter((i) => i.kind === 'elevator').sort((a, b) => a.at - b.at)) {
+      seg(skirt, it.at - ELEVATOR.width / 2 - 0.12, 0, 0.08, mat(PALETTE.wallCap, 0.8), 0.02, T / 2 + 0.01);
+      skirt = it.at + ELEVATOR.width / 2 + 0.12;
+    }
+    seg(skirt, end, 0, 0.08, mat(PALETTE.wallCap, 0.8), 0.02, T / 2 + 0.01);
 
     // decor on the inner face
     for (const it of items) {
-      if (it.kind === 'window') continue;
+      if (it.kind === 'window' || it.kind === 'elevator') continue;
       const d = new THREE.Group();
       if (it.kind === 'clock') {
         const face = mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 32), mat('#ffffff', 0.6), 0, 0, 0);
@@ -392,6 +489,88 @@ export class Office3D {
       else { placed.group.position.set(0.05, y, at); placed.group.rotation.y = Math.PI / 2; }
       this.scene.add(placed.group);
     }
+  }
+
+  // ---- elevator --------------------------------------------------------------------
+  private elev: {
+    left: THREE.Mesh; right: THREE.Mesh; up: THREE.MeshStandardMaterial; down: THREE.MeshStandardMaterial;
+    button: THREE.MeshStandardMaterial; open: number; openAt: number; openUntil: number; dir: 'up' | 'down';
+  } | null = null;
+  /** world points: inside the cab, and just outside its doors */
+  private elevIn = new THREE.Vector3();
+  private elevOut = new THREE.Vector3();
+
+  /** An elevator in an exterior wall: frame, sliding doors, floor indicator,
+      call buttons, and a lit cab behind the wall. Local +z points into the room. */
+  private buildElevator(axis: 'x' | 'z', at: number): void {
+    const { width: W, height: H, depth: D } = ELEVATOR;
+    const T = WALL.thickness;
+    const g = new THREE.Group();
+    if (axis === 'x') g.position.set(at, 0, 0);
+    else { g.position.set(0, 0, at); g.rotation.y = Math.PI / 2; }
+    // cab (behind the wall)
+    const cabZ = -T - D / 2;
+    const cabWall = mat('#e3e6ea', 0.5, 0.3), cabFloor = mat('#aab1bb', 0.7);
+    g.add(mesh(new THREE.BoxGeometry(W + 0.2, 0.02, D), cabFloor, 0, 0.01, cabZ));
+    g.add(mesh(new THREE.BoxGeometry(W + 0.2, H + 0.2, 0.04), cabWall, 0, (H + 0.2) / 2, -T - D));
+    for (const sx of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.04, H + 0.2, D), cabWall, sx * (W / 2 + 0.1), (H + 0.2) / 2, cabZ));
+    g.add(mesh(new THREE.BoxGeometry(W + 0.2, 0.04, D), mat('#fff6e0', 0.4, 0, '#fff1d0', 0.9), 0, H + 0.2, cabZ, false));
+    g.add(mesh(new THREE.BoxGeometry(W * 0.8, 0.04, 0.05), mat(PALETTE.metal, 0.3, 0.6), 0, 0.95, -T - D + 0.06)); // handrail
+    // frame + header on the room side
+    const frame = mat('#b8bec8', 0.35, 0.6);
+    for (const sx of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.12, H + 0.1, 0.06), frame, sx * (W / 2 + 0.06), (H + 0.1) / 2, 0.03));
+    g.add(mesh(new THREE.BoxGeometry(W + 0.24, 0.32, 0.06), frame, 0, H + 0.16, 0.03));
+    // floor indicator: ▲ ▼ that light up while the car arrives / leaves
+    g.add(mesh(new THREE.BoxGeometry(0.46, 0.16, 0.02), mat('#1e2433', 0.4), 0, H + 0.16, 0.065, false));
+    const up = new THREE.MeshStandardMaterial({ color: '#5a3a26', emissive: '#ff9a3c', emissiveIntensity: 0 });
+    const down = new THREE.MeshStandardMaterial({ color: '#5a3a26', emissive: '#ff9a3c', emissiveIntensity: 0 });
+    const tri = (m: THREE.Material, x: number, flip: boolean) => {
+      const t = mesh(new THREE.ConeGeometry(0.045, 0.08, 3), m, x, H + 0.16, 0.08, false);
+      t.rotation.z = flip ? Math.PI : 0;
+      g.add(t);
+    };
+    tri(up, -0.09, false);
+    tri(down, 0.09, true);
+    // sliding doors (they slide into the wall to either side)
+    const doorMat = new THREE.MeshStandardMaterial({ color: '#c9ced6', roughness: 0.3, metalness: 0.6 });
+    const left = mesh(new THREE.BoxGeometry(W / 2, H, 0.03), doorMat, -W / 4, H / 2, -0.04);
+    const right = mesh(new THREE.BoxGeometry(W / 2, H, 0.03), doorMat, W / 4, H / 2, -0.04);
+    g.add(left, right);
+    // call panel
+    g.add(mesh(new THREE.BoxGeometry(0.12, 0.3, 0.02), frame, W / 2 + 0.32, 1.1, 0.01));
+    const button = new THREE.MeshStandardMaterial({ color: '#f3f3f5', emissive: '#ffb347', emissiveIntensity: 0 });
+    g.add(mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.02, 16), button, W / 2 + 0.32, 1.15, 0.03, false).rotateX(Math.PI / 2));
+    g.add(mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.02, 16), mat('#f3f3f5', 0.4), W / 2 + 0.32, 1.05, 0.03, false).rotateX(Math.PI / 2));
+    this.scene.add(g);
+    g.updateMatrixWorld(true);
+    this.elevIn.copy(g.localToWorld(new THREE.Vector3(0, 0, cabZ)));
+    this.elevOut.copy(g.localToWorld(new THREE.Vector3(0, 0, 0.75)));
+    this.elev = { left, right, up, down, button, open: 0, openAt: 0, openUntil: 0, dir: 'down' };
+  }
+
+  /** Bring the car: the arrow lights, a short wait ("ding"), then doors open for `ms`. */
+  private callElevator(ms: number, dir: 'up' | 'down'): void {
+    const e = this.elev;
+    if (!e) return;
+    const now = performance.now();
+    if (now > e.openUntil) e.openAt = now + (e.open > 0.5 ? 0 : 700);
+    e.openUntil = Math.max(e.openUntil, now + ms);
+    e.dir = dir;
+  }
+
+  private updateElevator(dt: number, now: number): void {
+    const e = this.elev;
+    if (!e) return;
+    const target = now >= e.openAt && now < e.openUntil ? 1 : 0;
+    e.open += Math.sign(target - e.open) * Math.min(Math.abs(target - e.open), dt * 1.6);
+    const W = ELEVATOR.width, slide = (W / 2 - 0.04) * e.open;
+    e.left.position.x = -W / 4 - slide;
+    e.right.position.x = W / 4 + slide;
+    const active = now < e.openUntil + 600;
+    const blink = Math.sin(now / 160) > 0 ? 1 : 0.4;
+    e.up.emissiveIntensity = active && e.dir === 'up' ? 1.4 * blink : 0;
+    e.down.emissiveIntensity = active && e.dir === 'down' ? 1.4 * blink : 0;
+    e.button.emissiveIntensity = active ? 0.9 : 0;
   }
 
   // ---- glass enclosures ---------------------------------------------------------
@@ -567,6 +746,7 @@ export class Office3D {
     }
     await Promise.allSettled(jobs);
     this.runLayoutChecks();
+    this.applyTime(); // lamps + screens are known now
     this.renderer.shadowMap.needsUpdate = true;
     if (new URLSearchParams(location.search).get('debug') === 'map') this.drawDebugMap();
   }
@@ -637,7 +817,10 @@ export class Office3D {
       const remap = (src: THREE.Material): THREE.Material => {
         const name = src.name;
         const color = tint?.[name] ?? MATERIAL_DEFAULTS[name]?.color;
-        if (!color) return src; // lamp / glass keep their own look
+        if (!color) { // lamp / glass keep their own look
+          if (name === 'lamp') this.lampMats.add(src as THREE.MeshStandardMaterial);
+          return src;
+        }
         const metal = !tint?.[name] && (MATERIAL_DEFAULTS[name]?.metal ?? false);
         return mat(color, metal ? 0.5 : 0.85, metal ? 0.3 : 0);
       };
@@ -877,7 +1060,8 @@ export class Office3D {
         // The founder cat cycles through behaviours (roll on bed → sit & play →
         // curl up & sleep). Built pure-white + crown/bow. `roll` is the pivot
         // group the render loop animates per behaviour.
-        const { cat, tail } = makeCat(BOSS_WHITE, true);
+        const parts = makeCat(BOSS_WHITE, true);
+        const { cat, tail } = parts;
         // boss accessories: a little gold crown + a pink bow tie
         const gold = mat('#f2c14e', 0.3, 0.5, '#f2c14e', 0.15);
         const crown = new THREE.Group();
@@ -903,7 +1087,8 @@ export class Office3D {
         roll.position.y = 0;
         roll.scale.setScalar(0.95);
         g.add(roll);
-        this.boss = { roll, tip, cat, tail, ball };
+        ball.visible = false; // the boss has better things to do now: naps, grooming, 꾹꾹이
+        this.boss = { roll, tip, cat, tail, ball, root: g, parts };
         passive = true;
         break;
       }
@@ -1110,7 +1295,9 @@ export class Office3D {
   // ---- character: chibi tri-color cat ----------------------------------------------
   private buildCharacter(): void {
     const g = new THREE.Group();
-    const { cat, tail } = makeCat(CALICO);
+    const parts = makeCat(CALICO);
+    const { cat, tail } = parts;
+    this.agentParts = parts;
     this.catTail = tail;
     g.add(cat); this.catBody = cat;
 
@@ -1125,9 +1312,10 @@ export class Office3D {
     this.scene.add(g);
     this.character = g;
 
-    const bubble = document.createElement('div');
-    bubble.className = 'cat-bubble'; bubble.textContent = ''; bubble.style.display = 'none';
-    this.labelRoot.appendChild(bubble); this.bubbleEl = bubble;
+    // speech bubbles + name tags (textContent only: log text is untrusted)
+    this.agentHud = new Hud(this.labelRoot, '삼색이');
+    this.bossHud = new Hud(this.labelRoot, '👑 대표냥', 'boss');
+    this.bossHud.setTagVisible(false);
 
     this.buildLabels();
   }
@@ -1153,6 +1341,20 @@ export class Office3D {
   }
 
   // ---- public API -------------------------------------------------------------
+  /** Show what the agent is doing in a bubble over its head; null hides it. */
+  showBubble(info: BubbleInfo | null): void {
+    this.agentHud.show(info);
+  }
+
+  /** The name tag under the bubble (e.g. the session name). */
+  setAgentName(name: string): void {
+    this.agentHud.setName(name);
+  }
+  private hudX = 0;
+  /** screen positions of visible bubbles last frame, so room labels can step aside */
+  private hudSpots: Array<[number, number]> = [];
+  private hudY = 0;
+
   goToRoom(room: RoomId): void {
     const resolved = resolveRoom(room);
     if (!resolved) return;
@@ -1172,14 +1374,16 @@ export class Office3D {
     return [...out, ...into];
   }
 
-  setIdle(onBed: boolean): void {
-    if (!onBed) { this.onBed = false; return; }
-    const founder = zoneById('founder')!;
-    const into = founder.route!.map(([x, z]) => new THREE.Vector3(x, 0, z));
-    into.push(this.catBedPos.clone().setY(0));
-    const inFounder = this.charPos.x >= founder.x && this.charPos.z >= founder.z;
-    this.path = inFounder ? [this.catBedPos.clone().setY(0)] : this.routeTo(into);
+  /** Nothing to do: the agent goes for a nap on the lobby sofa (true), or wakes up (false). */
+  setIdle(rest: boolean): void {
+    if (!rest) { this.onBed = false; return; }
+    const lobby = zoneForRoom('lobby')!;
+    const sofa = this.restSpot.clone().setY(0);
+    const inLobby = this.zoneAt(this.charPos)?.id === lobby.id;
+    this.path = inLobby ? [sofa] : this.routeTo([...lobby.route!.slice(0, -1).map(([x, z]) => new THREE.Vector3(x, 0, z)), sofa]);
     this.onBed = true;
+    this.activeRoom = 'lobby';
+    this.highlightZone(lobby.id);
   }
 
   private highlightZone(id: string): void {
@@ -1188,6 +1392,589 @@ export class Office3D {
       if (zid === id) { mm.emissive.set('#33b277'); mm.emissiveIntensity = 0.12; }
       else { mm.emissive.setHex(0x000000); mm.emissiveIntensity = 0; }
     }
+  }
+
+  // ---- crew: workflow sub-agents + other sessions -------------------------------
+  /** Chairs crew cats can sit on, and cushions they nap on (not in the founder's office). */
+  private buildSeats(): void {
+    const NAP = new Set(['beanBag', 'loungeChair', 'loungeSofa', 'benchCushion']);
+    for (const z of ZONES) {
+      if (z.id === 'founder') continue;
+      z.furniture.forEach((p, i) => {
+        if (z.id === 'lobby' && p.asset === 'loungeSofa') { // the agent's own nap spot
+          this.restSpot.set(z.x + p.rx - 0.45, 0.44, z.z + p.rz); // the left cushion; the teddy bear keeps the middle
+          this.restYaw = FACE_YAW[p.face ?? 'S'];
+          return;
+        }
+        const base = { key: `${z.id}:${i}`, x: z.x + p.rx, z: z.z + p.rz, yaw: FACE_YAW[p.face ?? 'S'], zone: z.id };
+        if (p.asset === 'chairDesk' || p.asset === 'chair') this.seats.push({ ...base, y: p.asset === 'chairDesk' ? 0.5 : 0.46 });
+        else if (NAP.has(p.asset)) this.seats.push({ ...base, y: p.asset === 'beanBag' ? 0.4 : 0.44, nap: true });
+      });
+    }
+  }
+
+  private zoneAt(p: THREE.Vector3): ZoneDef | undefined {
+    return ZONES.find((z) => z.route && p.x >= z.x && p.x <= z.x + z.w && p.z >= z.z && p.z <= z.z + z.d);
+  }
+
+  /** from → out of its zone to the corridor → into `zone` (its route minus the spot) → `final`. */
+  private planPath(from: THREE.Vector3, zone: ZoneDef | undefined, final: THREE.Vector3): THREE.Vector3[] {
+    const v = ([x, z]: [number, number]) => new THREE.Vector3(x, 0, z);
+    const here = this.zoneAt(from);
+    if (here && zone && here.id === zone.id) return [final.clone()];
+    const out = here?.route ? here.route.slice(0, -1).reverse().map(v) : [new THREE.Vector3(from.x, 0, CORRIDOR_Z)];
+    const into = zone?.route ? zone.route.slice(0, -1).map(v) : [];
+    return [...out, ...into, final.clone()];
+  }
+
+  private releaseSeat(id: string): void {
+    for (const [k, owner] of this.seatTaken) if (owner === id) this.seatTaken.delete(k);
+  }
+
+  /** A free chair in the zone (or a standing spot near its entrance), or a free nap cushion. */
+  private claimSeat(id: string, zone: ZoneDef | undefined, nap: boolean): Seat | null {
+    this.releaseSeat(id);
+    const pick = this.seats.find((s) => !!s.nap === nap && (nap || s.zone === zone?.id) && !this.seatTaken.has(s.key));
+    if (pick) { this.seatTaken.set(pick.key, id); return pick; }
+    if (nap || !zone?.route) return null;
+    const [sx, sz] = zone.route[zone.route.length - 1];
+    for (let k = 0; k < 8; k++) {
+      const key = `${zone.id}:stand:${k}`;
+      if (this.seatTaken.has(key)) continue;
+      this.seatTaken.set(key, id);
+      const ang = (k / 8) * Math.PI * 2;
+      return { key, x: sx + Math.cos(ang) * 0.9, z: sz + Math.sin(ang) * 0.9, y: 0, yaw: Math.atan2(-Math.cos(ang), -Math.sin(ang)), zone: zone.id };
+    }
+    return null;
+  }
+
+  /** Reconcile the crew with the watcher's latest list. */
+  setCrew(members: CrewMember[]): void {
+    const seen = new Set<string>();
+    for (const m of members) {
+      seen.add(m.id);
+      const cat = this.crew.get(m.id) ?? this.spawnCrew(m);
+      this.updateCrew(cat, m);
+    }
+    for (const [id, cat] of this.crew) if (!seen.has(id) && !cat.leaving) this.sendHome(cat);
+  }
+
+  private spawnCrew(m: CrewMember): CrewCat & { leaveAt?: number; spawnAt: number } {
+    const coat: CatColors = coatFor(m.id);
+    const parts = makeCat(coat);
+    const { cat, tail } = parts;
+    if (m.kind === 'workflow') {
+      // workflow helpers wear a little beanie so they read as "sent in for a job"
+      const beanie = mesh(new THREE.SphereGeometry(0.16, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(PALETTE.accent, 0.8), 0, 0.72 - 0.5, 0.01);
+      beanie.scale.set(1, 0.7, 1);
+      parts.head.add(beanie, mesh(new THREE.SphereGeometry(0.04, 10, 8), mat('#ffffff', 0.9), 0, 0.84 - 0.5, 0.01));
+    }
+    const root = new THREE.Group();
+    root.add(cat);
+    root.scale.setScalar(0.01);
+    this.scene.add(root);
+    const hud = new Hud(this.labelRoot, '', 'crew');
+    const c = Object.assign(new CrewCat(m.id, root, cat, tail, hud), { spawnAt: performance.now() });
+    c.parts = parts;
+    if (m.kind === 'workflow' && this.elev) {
+      // ding — the doors open and the helper steps out
+      c.viaElevator = true;
+      c.pos.copy(this.elevIn);
+      c.root.rotation.y = this.elevatorYaw();
+      c.holdUntil = performance.now() + 1300;
+      this.callElevator(3200, 'down');
+    } else c.pos.copy(DOOR);
+    root.position.copy(c.pos);
+    this.crew.set(m.id, c);
+    return c;
+  }
+
+  /** Facing out of the elevator, into the room. */
+  private elevatorYaw(): number {
+    return Math.atan2(this.elevOut.x - this.elevIn.x, this.elevOut.z - this.elevIn.z);
+  }
+
+  /** Path to `target`; a newcomer first steps out of the elevator to say hello. */
+  private crewPath(c: CrewCat, zone: ZoneDef | undefined, target: THREE.Vector3): THREE.Vector3[] {
+    if (c.viaElevator && !c.greeted) return [this.elevOut.clone(), ...this.planPath(this.elevOut, zone, target)];
+    return this.planPath(c.pos, zone, target);
+  }
+
+  /** Show `info`, unless the cat is busy greeting — then show it right after. */
+  private crewBubble(c: CrewCat, info: BubbleInfo): void {
+    c.lastInfo = info;
+    if (performance.now() >= c.greetUntil) c.hud.show(info);
+  }
+
+  private startGreeting(c: CrewCat, kind: 'hello' | 'bye', now: number): void {
+    const elevator = c.viaElevator;
+    c.greetStart = now;
+    c.greetUntil = now + 2300;
+    if (kind === 'hello') c.greeted = true; else c.saidBye = true;
+    // face the office: out of the elevator, or back in from the street door
+    c.root.rotation.y = elevator ? this.elevatorYaw() : Math.PI;
+    c.hud.show(kind === 'hello'
+      ? { mode: 'say', icon: '👋', title: elevator ? `안녕하세요! ${c.name} 담당이에요` : '안녕하세요! 출근했어요', since: Date.now() }
+      : { mode: 'say', icon: '🙇', title: '수고하셨습니다!', sub: elevator ? '먼저 올라가 볼게요' : '내일 봬요', since: Date.now() });
+    if (kind === 'bye' && elevator) { this.callElevator(3200, 'up'); c.called = true; }
+  }
+
+  private updateCrew(c: CrewCat & { leaveAt?: number }, m: CrewMember): void {
+    if (c.leaving) return;
+    const short = m.name.length > 18 ? m.name.slice(0, 17) + '…' : m.name;
+    c.name = short;
+    c.hud.setName(m.kind === 'workflow' ? `🧩 ${short}` : short);
+    if (m.status === 'idle') {
+      if (c.state !== 'napping' && !(c.seat?.nap)) {
+        const seat = this.claimSeat(c.id, undefined, true);
+        if (!seat) { this.sendHome(c); return; }
+        c.seat = seat;
+        c.path = this.crewPath(c, zoneById(seat.zone), new THREE.Vector3(seat.x, 0, seat.z));
+        c.state = 'walking';
+      }
+      this.crewBubble(c, { mode: 'sleep', icon: '💤', title: 'zZ', since: m.since });
+      return;
+    }
+    const room = m.room ?? 'lobby';
+    const zone = zoneForRoom(resolveRoom(room) ?? 'lobby');
+    if (c.room !== room || !c.seat || c.seat.nap) {
+      c.room = room;
+      const seat = this.claimSeat(c.id, zone, false);
+      c.seat = seat;
+      const spot = zone?.route?.at(-1) ?? [11, 13];
+      const target = seat ? new THREE.Vector3(seat.x, 0, seat.z) : new THREE.Vector3(spot[0], 0, spot[1]);
+      c.path = this.crewPath(c, zone, target);
+      c.state = 'walking';
+    }
+    const roomName = zone?.label?.split(' · ')[0] ?? '';
+    const sub = [m.group, roomName].filter(Boolean).join(' · ');
+    if (m.status === 'done') {
+      this.crewBubble(c, { mode: 'done', icon: '✅', title: '작업 완료!', sub, since: m.since });
+      c.leaveAt ??= Date.now() + 4500;
+      return;
+    }
+    this.crewBubble(c,
+      m.mode === 'thinking' ? { mode: 'thinking', icon: '💭', title: '고민 중', since: m.since }
+      : m.mode === 'say' && m.detail ? { mode: 'say', icon: '💬', title: m.detail, sub, since: m.since }
+      : m.mode === 'waiting' ? { mode: 'waiting', icon: '✋', title: '승인 대기 중', sub: m.detail ?? sub, since: m.since }
+      : m.mode === 'done' ? { mode: 'done', icon: '☕', title: '한숨 돌리는 중', sub, since: m.since }
+      : { mode: 'action', icon: '🛠️', title: m.detail ?? m.tool ?? '작업 중', sub: [sub, m.tool].filter(Boolean).join(' · '), since: m.since });
+  }
+
+  /** Head for the exit (elevator or street door); the goodbye happens right at the exit. */
+  private sendHome(c: CrewCat): void {
+    this.releaseSeat(c.id);
+    c.seat = null;
+    c.leaving = true;
+    c.lastInfo = null;
+    c.state = 'leaving';
+    if (c.viaElevator && this.elev) {
+      const out = this.planPath(c.pos, undefined, new THREE.Vector3(this.elevOut.x, 0, CORRIDOR_Z));
+      c.path = [...out, this.elevOut.clone(), this.elevIn.clone()];
+      c.called = false;
+      c.hud.show({ mode: 'done', icon: '🛗', title: '일 끝! 엘리베이터로 가요', since: Date.now() });
+      return;
+    }
+    const out = this.planPath(c.pos, undefined, new THREE.Vector3(CORRIDOR2_X, 0, CORRIDOR_Z));
+    c.path = [...out, new THREE.Vector3(CORRIDOR2_X, 0, DOOR.z - 1.1), DOOR.clone()];
+    c.hud.show({ mode: 'done', icon: '🎒', title: '퇴근 준비', since: Date.now() });
+  }
+
+  private updateCrewCats(dt: number, now: number, el: HTMLCanvasElement): boolean {
+    let anyMoving = false;
+    for (const [id, c] of this.crew) {
+      if (c.leaveAt && Date.now() > c.leaveAt && !c.leaving) this.sendHome(c);
+      const age = (now - c.spawnAt) / 1000;
+      // hello: right outside the elevator, or at the street door once popped in
+      if (!c.greeted && !c.leaving && now >= c.holdUntil) {
+        const atElevator = c.viaElevator && c.pos.distanceTo(this.elevOut) < 0.05;
+        if (atElevator || (!c.viaElevator && age > 0.45)) this.startGreeting(c, 'hello', now);
+      }
+      // goodbye: at the exit, just before stepping into the elevator / out the door
+      if (c.leaving && !c.saidBye && c.path.length === 1) this.startGreeting(c, 'bye', now);
+      const greeting = now < c.greetUntil;
+      if (!greeting && c.greetUntil && now - c.greetUntil < 100 && c.lastInfo && !c.leaving) c.hud.show(c.lastInfo);
+      // elevator riders wait for the doors before stepping in or out
+      const intoCab = c.viaElevator && c.leaving && c.path.length === 1;
+      const doorsOpen = (this.elev?.open ?? 1) > 0.9;
+      const waiting = greeting || now < c.holdUntil || (intoCab && !doorsOpen) || (c.viaElevator && !c.leaving && c.pos.distanceTo(this.elevIn) < 0.05 && !doorsOpen);
+      const moving = waiting ? false : c.step(dt, 2.6);
+      anyMoving ||= moving;
+      // pop in at the street door, shrink away through it
+      let scale = c.viaElevator ? 0.85 : Math.min(1, age / 0.4) * 0.85;
+      if (!c.viaElevator && c.leaving && c.saidBye && c.path.length === 1 && !greeting) scale *= Math.min(1, c.pos.distanceTo(DOOR) / 1.1);
+      c.root.scale.setScalar(Math.max(0.01, scale));
+      // gone once through the street door, or once the elevator doors shut behind it
+      const gone = c.leaving && !c.path.length && (!c.viaElevator || (this.elev?.open ?? 0) < 0.05);
+      if (c.leaving && !c.path.length && c.viaElevator) c.root.rotation.y = this.elevatorYaw();
+      if (gone) {
+        this.scene.remove(c.root);
+        c.hud.remove();
+        this.crew.delete(id);
+        continue;
+      }
+      resetPose(c.parts);
+      let y = 0;
+      if (greeting) {
+        greetPose(c.parts, (now - c.greetStart) / (c.greetUntil - c.greetStart), now);
+        c.state = c.leaving ? 'leaving' : 'walking';
+      } else if (moving) {
+        c.state = c.leaving ? 'leaving' : 'walking';
+        c.body.position.y = Math.abs(Math.sin(now / 90)) * 0.05;
+        blink(c.parts, now, c.spawnAt);
+      } else if (c.seat && !c.path.length) {
+        y = c.seat.y;
+        c.root.rotation.y = c.seat.yaw;
+        c.pos.set(c.seat.x, 0, c.seat.z);
+        if (c.seat.nap) {
+          c.state = 'napping';
+          c.root.rotation.y = c.seat.yaw + Math.PI / 2;
+          sleepPose(c.parts, now + c.spawnAt);
+        } else {
+          c.state = 'seated';
+          c.body.position.y = Math.abs(Math.sin(now / 140 + c.spawnAt)) * 0.012; // typing bob
+          c.parts.paws.forEach((pw, i) => { // tap-tap on the keyboard
+            const r = pw.userData.rest as THREE.Vector3;
+            pw.position.set(r.x, r.y + 0.08 + Math.max(0, Math.sin(now / 90 + i * 2 + c.spawnAt)) * 0.03, r.z + 0.08);
+          });
+          blink(c.parts, now, c.spawnAt);
+        }
+      } else blink(c.parts, now, c.spawnAt);
+      if (c.state !== 'napping') c.tail.rotation.z = Math.sin(now / 320 + c.spawnAt) * 0.5;
+      c.root.position.set(c.pos.x, y, c.pos.z);
+      c.hud.update();
+      this.tmp.copy(c.root.position); this.tmp.y += c.state === 'napping' ? 0.55 : 0.85; this.tmp.project(this.camera);
+      const hx = (this.tmp.x * 0.5 + 0.5) * el.clientWidth, hy = (-this.tmp.y * 0.5 + 0.5) * el.clientHeight;
+      c.hud.place(hx, hy, c.state === 'napping' ? 0.75 : 1);
+      if (c.state !== 'napping') this.hudSpots.push([hx, hy]);
+    }
+    return anyMoving;
+  }
+
+  // ---- reactions ---------------------------------------------------------------
+  /** Office reactions to results: confetti for a green test run, a sweat drop for
+      failures, server LEDs flashing green for a commit. */
+  react(kind: 'oops' | 'testPass' | 'testFail' | 'commit'): void {
+    if (kind === 'oops' || kind === 'testFail') {
+      if (this.sweat) this.character.remove(this.sweat.mesh);
+      const drop = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), new THREE.MeshStandardMaterial({ color: '#8fd0ff', emissive: '#5fb8f0', emissiveIntensity: 0.35, transparent: true, opacity: 0.9 }));
+      drop.scale.set(0.8, 1.25, 0.8);
+      this.character.add(drop);
+      this.sweat = { mesh: drop, t0: performance.now() };
+    }
+    if (kind === 'testPass') {
+      const z = zoneById('test')!;
+      this.spawnConfetti(new THREE.Vector3(z.x + z.w / 2, 1.2, z.z + z.d / 2));
+    }
+    if (kind === 'commit') this.ledFlashUntil = Date.now() + 4000;
+  }
+
+  private spawnConfetti(at: THREE.Vector3): void {
+    if (this.confetti) { this.scene.remove(this.confetti.mesh); this.confetti.mesh.dispose(); }
+    const N = 140;
+    const m = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.012, 0.11), new THREE.MeshStandardMaterial({ roughness: 0.6 }), N);
+    const colors = [PALETTE.hotPink, PALETTE.butter, PALETTE.mint, PALETTE.sky, PALETTE.lilac, PALETTE.accent];
+    const pos: THREE.Vector3[] = [], vel: THREE.Vector3[] = [], spin: THREE.Vector3[] = [];
+    for (let i = 0; i < N; i++) {
+      m.setColorAt(i, new THREE.Color(colors[i % colors.length]));
+      pos.push(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, Math.random() * 0.3, (Math.random() - 0.5) * 0.6)));
+      const a = Math.random() * Math.PI * 2, s = 1.2 + Math.random() * 2.2;
+      vel.push(new THREE.Vector3(Math.cos(a) * s, 3.5 + Math.random() * 3, Math.sin(a) * s));
+      spin.push(new THREE.Vector3(Math.random() * 12, Math.random() * 12, Math.random() * 12));
+    }
+    m.castShadow = false;
+    this.scene.add(m);
+    this.confetti = { mesh: m, pos, vel, spin, t0: performance.now() };
+  }
+
+  private updateReactions(dt: number, now: number): void {
+    if (this.sweat) {
+      const t = (now - this.sweat.t0) / 1000;
+      const cycle = t % 1.1;
+      this.sweat.mesh.position.set(0.2, 0.78 - cycle * 0.3, 0.12);
+      (this.sweat.mesh.material as THREE.MeshStandardMaterial).opacity = Math.max(0, 0.9 - cycle * 0.7);
+      if (t > 3.3) { this.character.remove(this.sweat.mesh); this.sweat = null; }
+    }
+    if (this.confetti) {
+      const c = this.confetti;
+      const t = (now - c.t0) / 1000;
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1);
+      for (let i = 0; i < c.pos.length; i++) {
+        const v = c.vel[i];
+        v.y -= 9 * dt;
+        v.multiplyScalar(0.985);
+        c.pos[i].addScaledVector(v, dt);
+        if (c.pos[i].y < 0.01) { c.pos[i].y = 0.01; v.set(0, 0, 0); }
+        e.set(c.spin[i].x * t, c.spin[i].y * t, c.spin[i].z * t);
+        m4.compose(c.pos[i], q.setFromEuler(e), one);
+        c.mesh.setMatrixAt(i, m4);
+      }
+      c.mesh.instanceMatrix.needsUpdate = true;
+      if (t > 5) { this.scene.remove(c.mesh); c.mesh.dispose(); this.confetti = null; }
+    }
+  }
+
+  // ---- time of day ---------------------------------------------------------------
+  /** Light the office for the given hour (default: the clock). Night turns on
+      desk lamps and monitor glow; sunset paints everything warm. */
+  setTimeOfDay(hours: number | null): void {
+    this.fixedHour = hours;
+    this.applyTime();
+  }
+
+  private applyTime(): void {
+    const d = new Date();
+    const look = lookAt(this.fixedHour ?? d.getHours() + d.getMinutes() / 60);
+    (this.scene.background as THREE.Color).set(look.bg);
+    this.hemi.color.set(look.sky);
+    this.hemi.groundColor.set(look.ground);
+    this.hemi.intensity = look.hemi;
+    this.key.color.set(look.key);
+    this.key.intensity = look.keyI;
+    this.renderer.toneMappingExposure = look.exposure;
+    for (const w of this.windowMats) {
+      w.color.set(look.win);
+      w.emissive.set(look.win);
+      w.emissiveIntensity = look.night * 0.35;
+      w.opacity = 0.22 + look.night * 0.5;
+    }
+    for (const l of this.lampMats) { l.emissive.set('#ffcf87'); l.emissiveIntensity = look.night * 1.3; }
+    const screen = new THREE.Color(PALETTE.screen).getHex();
+    for (const m of matCache.values()) {
+      if (m.color.getHex() === screen) { m.emissive.set('#6f8fd0'); m.emissiveIntensity = 0.05 + look.night * 0.55; }
+    }
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  // ---- boss cat: a cute day on the bed ---------------------------------------
+  private static readonly BOSS_ROUTINE: Array<{ id: string; secs: number; icon: string; title: string }> = [
+    { id: 'sleep', secs: 10, icon: '💤', title: 'zZ… 꿀잠' },
+    { id: 'stretch', secs: 2.6, icon: '🙆', title: '기지개 쭈욱~' },
+    { id: 'groom', secs: 5, icon: '🧼', title: '세수하는 중' },
+    { id: 'knead', secs: 5, icon: '💕', title: '꾹꾹이' },
+    { id: 'roll', secs: 4.5, icon: '😸', title: '뒹굴뒹굴' },
+    { id: 'loaf', secs: 7, icon: '🍞', title: '식빵 굽는 중' },
+  ];
+
+  private bossIdle(now: number): void {
+    const b = this.boss!;
+    const p = b.parts;
+    const routine = Office3D.BOSS_ROUTINE;
+    const total = routine.reduce((n, r) => n + r.secs, 0);
+    let t = (now / 1000) % total;
+    let phase = routine[0];
+    for (const r of routine) { if (t < r.secs) { phase = r; break; } t -= r.secs; }
+    if (phase.id !== this.bossPhase) {
+      this.bossPhase = phase.id;
+      this.bossHud.show({ mode: 'sleep', icon: phase.icon, title: phase.title, since: Date.now() });
+    }
+    // neutral, then the phase's pose
+    b.roll.rotation.set(0, 0, 0);
+    b.roll.position.set(0, 0, 0);
+    b.tip.rotation.set(0, 0, 0);
+    b.tip.position.set(0, 0, 0);
+    resetPose(p);
+    b.cat.scale.setScalar(0.95);
+    const s = now / 1000;
+    switch (phase.id) {
+      case 'sleep':
+        sleepPose(p, now);
+        p.cat.scale.multiplyScalar(0.95);
+        p.tail.rotation.y = Math.sin(s * 0.6) * 0.08;
+        break;
+      case 'stretch': { // front down, bottom up, paws reaching forward
+        const k = Math.sin((t / phase.secs) * Math.PI);
+        b.tip.rotation.x = 0.55 * k;
+        p.cat.scale.set(0.95, 0.95 - 0.08 * k, 0.95 + 0.15 * k);
+        for (const pw of p.paws) { const r = pw.userData.rest as THREE.Vector3; pw.position.set(r.x, 0.06 + 0.1 * (1 - k), r.z + 0.16 * k); }
+        p.head.rotation.x = -0.35 * k;
+        closeEyes(p, k);
+        p.tail.rotation.z = 0.3;
+        p.tail.rotation.x = -1.2 * k;
+        break;
+      }
+      case 'groom': { // licks a paw and washes its face in little circles
+        const r = p.paws[1].userData.rest as THREE.Vector3;
+        p.paws[1].position.set(0.05 + Math.cos(s * 6) * 0.03, 0.5 + Math.sin(s * 6) * 0.04, r.z + 0.08);
+        p.head.rotation.z = 0.22 + Math.sin(s * 6) * 0.06;
+        p.head.rotation.x = 0.12;
+        closeEyes(p);
+        p.tail.rotation.z = Math.sin(s * 1.2) * 0.3;
+        break;
+      }
+      case 'knead': { // crouched, pressing the blanket left-right, eyes shut in bliss
+        p.cat.scale.set(1.0, 0.82, 1.0);
+        p.paws.forEach((pw, i) => {
+          const r = pw.userData.rest as THREE.Vector3;
+          pw.position.set(r.x, 0.08 + Math.max(0, Math.sin(s * 7 + i * Math.PI)) * 0.09, r.z + 0.08);
+        });
+        b.tip.rotation.x = 0.12;
+        p.head.rotation.x = Math.sin(s * 7) * 0.04;
+        closeEyes(p);
+        p.tail.rotation.z = Math.sin(s * 2) * 0.5;
+        break;
+      }
+      case 'roll': { // on its back, wriggling side to side with paws in the air
+        b.roll.rotation.x = -Math.PI / 2 + 0.15;
+        b.roll.rotation.z = Math.sin(s * 3.2) * 0.45;
+        b.roll.position.set(0, 0.17, 0.28);
+        for (const pw of p.paws) { const r = pw.userData.rest as THREE.Vector3; pw.position.set(r.x * 1.3, r.y + 0.04 + Math.sin(s * 8 + r.x * 20) * 0.03, r.z + 0.05); }
+        closeEyes(p, 0.8);
+        p.tail.rotation.z = Math.sin(s * 6) * 0.8;
+        break;
+      }
+      default: { // 식빵: a perfect loaf, paws tucked, slow blinks
+        p.cat.scale.set(1.08, 0.7, 1.12);
+        for (const pw of p.paws) pw.visible = false;
+        closeEyes(p, Math.sin(s * 0.9) > 0.3 ? 0.9 : 0.4);
+        p.tail.rotation.x = -1.4;
+        p.tail.rotation.z = 1.1;
+        p.head.rotation.x = 0.05;
+      }
+    }
+  }
+
+  // ---- boss cat: approvals ----------------------------------------------------
+  /** The agent is waiting for an approval: the boss gets off the bed and sits at the desk. */
+  bossReview(): void {
+    if (!this.boss || this.bossMode === 'review' || this.bossMode === 'toDesk' || this.bossMode === 'stamp') return;
+    const f = zoneById('founder')!;
+    this.bossHome ??= this.boss.root.position.clone();
+    const from = this.bossMode === 'toBed' ? this.bossPos.clone() : this.bossHome.clone();
+    this.bossPos.copy(from);
+    this.bossPath = [
+      new THREE.Vector3(f.x + 6.3, 0, f.z + 4.3),
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.6),
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 0.6),
+      new THREE.Vector3(f.x + 3.1, 0.5, f.z + 0.88),
+    ];
+    this.bossMode = 'toDesk';
+    this.bossPhase = '';
+    resetPose(this.boss.parts);
+    this.boss.roll.rotation.set(0, 0, 0);
+    this.boss.tip.rotation.set(0, 0, 0);
+    this.boss.tip.position.set(0, 0, 0);
+    this.bossHud.show({ mode: 'waiting', icon: '🧐', title: '결재 서류 확인하러 가는 중', since: Date.now() });
+  }
+
+  /** The approval came back: stamp it (or not), then go back to the bed. */
+  bossVerdict(approved: boolean): void {
+    if (!this.boss || this.bossMode === 'play' || this.bossMode === 'toBed') return;
+    if (this.bossMode === 'toDesk') { this.bossPath = []; this.bossPos.set(zoneById('founder')!.x + 3.1, 0.5, zoneById('founder')!.z + 0.88); }
+    this.bossMode = 'stamp';
+    this.bossUntil = performance.now() + 2800;
+    this.ensureStamp();
+    this.stamp!.seal.visible = false;
+    this.stamp!.seal.userData.approved = approved;
+    this.bossHud.show(approved
+      ? { mode: 'party', icon: '✅', title: '승인! 쾅', since: Date.now() }
+      : { mode: 'oops', icon: '❌', title: '반려합니다', since: Date.now() });
+  }
+
+  /** The turn ended without a verdict: just go back to bed. */
+  bossDismiss(): void {
+    if (!this.boss || this.bossMode === 'play' || this.bossMode === 'toBed') return;
+    this.bossBackToBed();
+  }
+
+  private bossBackToBed(): void {
+    const f = zoneById('founder')!;
+    this.bossPath = [
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 0.6),
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.6),
+      new THREE.Vector3(f.x + 6.3, 0, f.z + 4.3),
+      this.bossHome!.clone(),
+    ];
+    this.bossMode = 'toBed';
+    this.bossHud.show({ mode: 'sleep', icon: '😽', title: '다시 놀러 가요', since: Date.now(), ttl: 2500 });
+  }
+
+  /** A paper on the founder's desk, a rubber stamp, and the seal it leaves. */
+  private ensureStamp(): void {
+    if (this.stamp) { this.stamp.root.visible = true; return; }
+    const f = zoneById('founder')!;
+    const root = new THREE.Group();
+    root.position.set(f.x + 3.1, 0.755, f.z + 1.35);
+    const paper = mesh(new THREE.BoxGeometry(0.34, 0.004, 0.46), mat('#ffffff', 0.9), 0, 0.002, 0, false);
+    for (let i = 0; i < 4; i++) paper.add(mesh(new THREE.BoxGeometry(0.24, 0.002, 0.015), mat('#c9ced6', 0.9), -0.02, 0.003, -0.15 + i * 0.06, false));
+    const seal = mesh(new THREE.TorusGeometry(0.06, 0.012, 6, 24), mat('#e0453a', 0.6, 0, '#e0453a', 0.2), 0.07, 0.006, 0.12, false);
+    seal.rotation.x = Math.PI / 2;
+    const tool = new THREE.Group();
+    tool.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 16), mat('#e0453a', 0.5), 0, 0.02, 0, false));
+    tool.add(mesh(new THREE.CylinderGeometry(0.022, 0.03, 0.14, 12), mat(PALETTE.lightWood, 0.6), 0, 0.11, 0, false));
+    tool.add(mesh(new THREE.SphereGeometry(0.035, 12, 10), mat(PALETTE.lightWood, 0.6), 0, 0.2, 0, false));
+    tool.position.set(0.07, 0.25, 0.12);
+    root.add(paper, seal, tool);
+    this.scene.add(root);
+    this.stamp = { root, seal, tool };
+  }
+
+  private updateBoss(dt: number, now: number, el: HTMLCanvasElement): boolean {
+    if (!this.boss) return false;
+    const b = this.boss;
+    let moving = false;
+    if (this.bossMode !== 'play') {
+      this.bossHome ??= b.root.position.clone();
+      if (this.bossPath.length) {
+        const target = this.bossPath[0];
+        const dx = target.x - this.bossPos.x, dz = target.z - this.bossPos.z, dy = target.y - this.bossPos.y;
+        const dist = Math.hypot(dx, dz) || 1e-6;
+        const len = 2.2 * dt;
+        if (dist <= len) { this.bossPos.copy(target); this.bossPath.shift(); }
+        else { this.bossPos.x += (dx / dist) * len; this.bossPos.z += (dz / dist) * len; this.bossPos.y += dy * Math.min(1, len / dist); }
+        b.root.rotation.y = Math.atan2(dx, dz);
+        b.roll.position.y = Math.abs(Math.sin(now / 95)) * 0.05;
+        b.tip.rotation.y = 0;
+        moving = true;
+      } else if (this.bossMode === 'toDesk') {
+        this.bossMode = 'review';
+        b.root.rotation.y = 0;
+        this.bossHud.show({ mode: 'waiting', icon: '🧐', title: '결재 검토 중', sub: '사장님 승인을 기다려요', since: Date.now() });
+      } else if (this.bossMode === 'toBed') {
+        this.bossMode = 'play';
+        b.root.position.copy(this.bossHome!);
+        b.root.rotation.y = 0;
+        this.bossHud.show(null);
+        return true;
+      }
+      if (this.bossMode === 'review') {
+        b.roll.position.y = 0;
+        b.tip.rotation.y = Math.sin(now / 700) * 0.15;       // reading, head tilting
+        b.tail.rotation.z = Math.sin(now / 260) * 0.6;
+      }
+      if (this.bossMode === 'stamp' && this.stamp) {
+        const left = this.bossUntil - now;
+        const t = 2800 - left;
+        // two slams in the first 1.2s, then the seal stays
+        const slam = t < 1200 ? Math.abs(Math.sin((t / 1200) * Math.PI * 2)) : 1;
+        this.stamp.tool.position.y = 0.03 + slam * 0.22;
+        if (t > 300 && this.stamp.seal.userData.approved) this.stamp.seal.visible = true;
+        b.roll.position.y = t < 1200 ? (1 - slam) * 0.04 : 0;
+        if (left <= 0) {
+          this.stamp.root.visible = false;
+          this.bossBackToBed();
+        }
+      }
+      b.root.position.copy(this.bossPos);
+    }
+    this.bossHud.update();
+    if (this.bossHud.visible) {
+      this.tmp.copy(b.root.position); this.tmp.y += 0.95; this.tmp.project(this.camera);
+      const hx = (this.tmp.x * 0.5 + 0.5) * el.clientWidth, hy = (-this.tmp.y * 0.5 + 0.5) * el.clientHeight;
+      this.bossHud.place(hx, hy);
+      this.hudSpots.push([hx, hy]);
+    } else this.bossHud.place(-9999, -9999, 0);
+    return moving;
+  }
+
+  /** Crew, reactions and the boss: everything that animates besides the agent. */
+  private renderExtras(dt: number, now: number, el: HTMLCanvasElement): void {
+    this.hudSpots = [];
+    const crewMoving = this.updateCrewCats(dt, now, el);
+    const bossMoving = this.updateBoss(dt, now, el);
+    this.updateReactions(dt, now);
+    this.updateElevator(dt, now);
+    if (crewMoving || bossMoving) this.renderer.shadowMap.needsUpdate = true;
   }
 
   // ---- camera framing ---------------------------------------------------------
@@ -1231,7 +2018,7 @@ export class Office3D {
   private tmp = new THREE.Vector3();
 
   render(now: number): void {
-    const dt = Math.min(0.05, this.lastNow ? (now - this.lastNow) / 1000 : 0);
+    const dt = Math.max(0, Math.min(0.05, this.lastNow ? (now - this.lastNow) / 1000 : 0));
     this.lastNow = now;
     if (Math.abs(this.zoomTarget - this.zoom) > 0.001) {
       this.zoom += (this.zoomTarget - this.zoom) * 0.15;
@@ -1252,58 +2039,38 @@ export class Office3D {
       moved = true;
     }
     const resting = this.onBed && this.path.length === 0;
-    this.character.position.set(this.charPos.x, resting ? this.catBedPos.y : 0, this.charPos.z);
+    this.character.position.set(this.charPos.x, resting ? this.restSpot.y : 0, this.charPos.z);
+    resetPose(this.agentParts);
     if (resting) {
-      this.catBody.rotation.z = Math.PI / 2 - 0.15;
-      this.catBody.position.y = 0.12;
+      // curled up asleep on the sofa, tail wrapped around
+      this.character.rotation.y = this.restYaw + Math.PI / 2;
+      sleepPose(this.agentParts, now);
+      this.catTail.rotation.y = Math.sin(now / 1400) * 0.1;
     } else {
-      this.catBody.rotation.z = 0;
       this.catBody.position.y = moved ? Math.abs(Math.sin(now / 90)) * 0.05 : Math.sin(now / 240) * 0.015;
+      blink(this.agentParts, now);
+      this.catTail.rotation.z = Math.sin(now / 300) * 0.5;
+      this.catTail.rotation.y = Math.sin(now / 520) * 0.3;
     }
-    this.catTail.rotation.z = Math.sin(now / 300) * (resting ? 0.28 : 0.5);
-    this.catTail.rotation.y = Math.sin(now / 520) * (resting ? 0.18 : 0.3);
 
-    // boss cat: rolls side → belly-up → other side and back, squirming as it goes
-    if (this.boss) {
-      const t = now / 1000;
-      // The boss cat stays UPRIGHT (same orientation as the agent cat) and plays
-      // with a ball: mostly batting at it (ball bounces), with an occasional
-      // little sit-and-watch beat. No lying face-down.
-      const { roll, tip, cat, tail, ball } = this.boss;
-      roll.rotation.z = 0;      // always upright
-      roll.rotation.x = 0;
-      cat.scale.setScalar(0.95);
-
-      const PLAY = 9, REST = 4, CYCLE = PLAY + REST;
-      const p = t % CYCLE;
-      if (p < PLAY) {
-        // batting the ball: body hops/leans, ball bounces toward/away
-        const q = p;
-        roll.position.y = Math.abs(Math.sin(q * 3.0)) * 0.04;      // little hops
-        tip.rotation.y = Math.sin(q * 2.2) * 0.4;                  // swat L/R
-        tail.rotation.z = Math.sin(q * 7) * 0.8;                   // excited tail
-        // ball: bounces in height and skitters forward/back in z
-        ball.position.y = 0.09 + Math.abs(Math.sin(q * 5.5)) * 0.18;
-        ball.position.z = 0.3 + Math.sin(q * 2.2) * 0.14;
-        ball.visible = true;
-      } else {
-        // brief sit & watch
-        const q = p - PLAY;
-        roll.position.y = 0;
-        tip.rotation.y = Math.sin(q * 0.8) * 0.12;
-        tail.rotation.z = Math.sin(q * 1.4) * 0.3;
-        ball.position.y = 0.09;
-        ball.position.z = 0.3;
-      }
-    }
+    // boss cat's day on the bed: nap → stretch → groom → 꾹꾹이 → 뒹굴뒹굴 → 식빵
+    if (this.boss && this.bossMode === 'play') this.bossIdle(now);
     if (moved || this.wasMoving) this.renderer.shadowMap.needsUpdate = true;
     this.wasMoving = moved;
 
     const t = Math.floor(now / 400);
-    for (let i = 0; i < this.leds.length; i++) this.leds[i].emissiveIntensity = (t + i) % 4 === 0 ? 1.4 : 0.5;
+    const flash = Date.now() < this.ledFlashUntil;
+    for (let i = 0; i < this.leds.length; i++) {
+      this.leds[i].emissive.set(flash ? '#46e08a' : PALETTE.led);
+      this.leds[i].emissiveIntensity = flash ? ((t + i) % 2 ? 1.8 : 0.9) : (t + i) % 4 === 0 ? 1.4 : 0.5;
+    }
 
     const el = this.renderer.domElement;
     const activeZone = this.activeRoom === 'po' ? 'founder' : this.activeRoom;
+    this.tmp.copy(this.charPos); this.tmp.y += 0.95; this.tmp.project(this.camera);
+    this.hudX = (this.tmp.x * 0.5 + 0.5) * el.clientWidth;
+    this.hudY = (-this.tmp.y * 0.5 + 0.5) * el.clientHeight;
+    if (this.agentHud.visible) this.hudSpots.push([this.hudX, this.hudY]);
     for (const l of this.labels) {
       this.tmp.copy(l.world).project(this.camera);
       const x = (this.tmp.x * 0.5 + 0.5) * el.clientWidth;
@@ -1311,12 +2078,13 @@ export class Office3D {
       l.el.style.transform = `translate(-50%,-100%) translate(${x}px,${y}px)`;
       // hoverOnly labels fade with hover; always-on labels (room names) stay visible.
       l.el.style.opacity = l.hoverOnly ? (this.hoverZone === l.zone ? '1' : '0') : '1';
+      // a room label right under the cat's bubble would collide with it: fade it out
+      if (this.hudSpots.some(([hx, hy]) => Math.abs(x - hx) < 130 && y > hy - 110 && y < hy + 40)) l.el.style.opacity = '0.12';
       l.el.dataset.active = String(l.zone === activeZone);
     }
-    if (this.bubbleEl.style.display !== 'none') {
-      this.tmp.copy(this.charPos); this.tmp.y += 1.0; this.tmp.project(this.camera);
-      this.bubbleEl.style.transform = `translate(-50%,-100%) translate(${(this.tmp.x * 0.5 + 0.5) * el.clientWidth}px,${(-this.tmp.y * 0.5 + 0.5) * el.clientHeight}px)`;
-    }
+    this.agentHud.update();
+    this.agentHud.place(this.hudX, this.hudY);
+    this.renderExtras(dt, now, el);
 
     this.composer.render();
   }

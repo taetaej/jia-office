@@ -11,6 +11,7 @@ import type { ActivityEvent } from './types.js';
 import { sanitize } from './parser.js';
 
 interface WorkflowState {
+  parentSessionId?: string;
   workflowId?: string;
   workflowName?: string;
   status?: string;
@@ -42,6 +43,7 @@ export async function scanWorkflows(
     } catch {
       continue;
     }
+    if (state.parentSessionId && state.parentSessionId !== sessionId) continue; // another session's workflow
     const status = typeof state.status === 'string' ? state.status : 'unknown';
     const key = `${hash}/${wf}`;
     if (seen.get(key) === status) continue; // no change

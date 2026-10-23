@@ -3,7 +3,7 @@
 // innerHTML), truncated upstream by the watcher, and never eval'd.
 
 import { ROOMS, ROOM_ORDER, type RoomId } from './rooms.js';
-import { Office3D } from './scene3d.js';
+import { Office3D, type BubbleInfo } from './scene3d.js';
 import { OfficeSocket, type ActivityEvent, type SessionInfo } from './socket.js';
 
 const canvas = document.getElementById('office') as HTMLCanvasElement;
@@ -18,19 +18,30 @@ const autoFollow = document.getElementById('auto-follow') as HTMLInputElement;
 
 const office = new Office3D(canvas, roomLabels);
 
-// ---- idle → the AGENT cat waits in the LOBBY -------------------------------
-// The agent cat (삼색이) is the worker; when idle it should NOT invade the
-// Founder's private office/bed — that's the boss cat's spot. On idle it simply
-// returns to the lobby and waits; any new event wakes it to the active room.
-const IDLE_MS = 8000;
+// ---- idle → the AGENT cat naps on the lobby sofa ----------------------------
+// After a finished turn (or a long quiet spell) the agent cat curls up on the
+// lobby sofa. The next event wakes it and it walks back to the room it was in.
+const IDLE_MS = 60_000;      // no events at all for a minute
+const AFTER_TURN_MS = 4000;  // a short beat after a turn ends
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
-function noteActivity(): void {
-  office.setIdle(false);
+let resting = false;
+function scheduleRest(ms: number): void {
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    // idle: the agent cat goes back to the lobby to wait (never the founder bed)
-    office.goToRoom('lobby');
-  }, IDLE_MS);
+    resting = true;
+    office.setIdle(true);
+    office.showBubble({ mode: 'sleep', icon: '💤', title: '쉬는 중… zZ', since: Date.now() });
+  }, ms);
+}
+function noteActivity(ev?: ActivityEvent): void {
+  if (resting) {
+    // wake up and go back to work
+    resting = false;
+    office.setIdle(false);
+    office.showBubble(null);
+    office.goToRoom(currentRoom);
+  }
+  scheduleRest(ev?.kind === 'turn_end' ? AFTER_TURN_MS : IDLE_MS);
 }
 
 let currentRoom: RoomId = 'lobby';
@@ -138,6 +149,71 @@ function setRoom(room: string): void {
   if (autoFollow.checked) office.goToRoom(r);
 }
 
+// ---- speech bubble over the agent cat -------------------------------------------
+const ROOM_ICON: Record<string, string> = {
+  archive: '🔎', dev: '✏️', server: '⌨️', test: '🧪', research: '🌐', meeting: '📝', po: '✋', lobby: '☕',
+};
+let thinkingSince = 0;
+
+/** Map one activity event to the bubble state it implies (undefined = keep the current one). */
+function bubbleFor(ev: ActivityEvent): BubbleInfo | null | undefined {
+  const roomName = ev.room && ev.room in ROOMS ? ROOMS[ev.room as RoomId].label : '';
+  switch (ev.kind) {
+    case 'assistant':
+      if (ev.label === 'thinking') {
+        if (!thinkingSince) thinkingSince = ev.ts;
+        return { mode: 'thinking', icon: '💭', title: '고민 중', since: thinkingSince };
+      }
+      thinkingSince = 0;
+      return ev.detail ? { mode: 'say', icon: '💬', title: ev.detail, since: ev.ts } : undefined;
+    case 'tool_call':
+      thinkingSince = 0;
+      return {
+        mode: 'action', icon: ROOM_ICON[ev.room ?? ''] ?? '🛠️',
+        title: ev.detail ?? ev.tool ?? ev.label,
+        sub: [roomName, ev.tool].filter(Boolean).join(' · '),
+        since: ev.ts,
+      };
+    case 'pending_interaction':
+      thinkingSince = 0;
+      return { mode: 'waiting', icon: '✋', title: '승인 대기 중', sub: ev.question, since: ev.ts };
+    case 'user':
+      thinkingSince = 0;
+      return { mode: 'say', icon: '📩', title: '새 요청을 받았어요', since: ev.ts, ttl: 4000 };
+    case 'turn_end':
+      thinkingSince = 0;
+      return { mode: 'done', icon: '✅', title: '작업 완료', since: ev.ts, ttl: 5000 };
+    default:
+      return undefined;
+  }
+}
+
+function applyBubble(ev: ActivityEvent): void {
+  const next = bubbleFor(ev);
+  if (next !== undefined) office.showBubble(next);
+}
+
+/** Live-only reactions: confetti, sweat, LED flashes, and the boss cat's approvals. */
+function react(ev: ActivityEvent): void {
+  if (ev.kind === 'tool_result') {
+    if (ev.tag === 'test') {
+      office.react(ev.ok ? 'testPass' : 'testFail');
+      office.showBubble(ev.ok
+        ? { mode: 'party', icon: '🎉', title: '테스트 통과!', since: ev.ts, ttl: 4000 }
+        : { mode: 'oops', icon: '🧪', title: '테스트가 실패했어요', sub: '다시 고쳐 볼게요', since: ev.ts, ttl: 4000 });
+    } else if (ev.tag === 'commit' && ev.ok) {
+      office.react('commit');
+      office.showBubble({ mode: 'party', icon: '🚀', title: '커밋 완료!', since: ev.ts, ttl: 4000 });
+    } else if (ev.ok === false) {
+      office.react('oops');
+      office.showBubble({ mode: 'oops', icon: '💧', title: '앗, 실패했어요', sub: '다른 방법을 찾아볼게요', since: ev.ts, ttl: 3500 });
+    }
+  }
+  if (ev.kind === 'pending_interaction') office.bossReview();
+  if (ev.kind === 'interaction_resolved') office.bossVerdict(ev.detail === 'approved');
+  if (ev.kind === 'turn_end') office.bossDismiss();
+}
+
 // ---- socket -----------------------------------------------------------------
 const socket = new OfficeSocket({
   onStatus: (ok) => {
@@ -151,15 +227,26 @@ const socket = new OfficeSocket({
     for (const ev of f.events) addActivity(ev);
     const active = sessions.find((s) => s.sessionId === activeSessionId);
     sessionNameEl.textContent = active ? active.name : '세션';
+    office.setAgentName(active ? `삼색이 · ${active.name}` : '삼색이');
+    // restore the bubble from recent history (an old, finished session stays quiet)
+    thinkingSince = 0;
+    office.showBubble(null);
+    const recent = f.events.filter((ev) => Date.now() - ev.ts < 10 * 60_000);
+    for (const ev of recent) applyBubble(ev);
     currentRoom = (f.currentRoom in ROOMS ? f.currentRoom : 'lobby') as RoomId;
     office.goToRoom(currentRoom);
-    noteActivity();
+    noteActivity(f.events.at(-1)); // a finished turn → nap soon
     renderFloors();
   },
   onEvent: (f) => {
+    noteActivity(f.event); // wakes a napping agent first
     addActivity(f.event);
+    applyBubble(f.event);
+    react(f.event);
     setRoom(f.currentRoom);
-    noteActivity();
+  },
+  onCrew: (f) => {
+    office.setCrew(f.members);
   },
   onSessions: (f) => {
     sessions = f.sessions;
