@@ -1,14 +1,13 @@
-// main.ts — wires the WebSocket feed to the Canvas office + UI chrome.
+// main.ts — wires the WebSocket feed to the 3D office (scene3d) + UI chrome.
 // SECURITY: all log-derived strings are inserted via textContent only (never
 // innerHTML), truncated upstream by the watcher, and never eval'd.
 
-import { type Ctx, type Origin } from './iso.js';
-import { ROOMS, ROOM_ORDER, type RoomId, drawFloors, drawFurniture } from './rooms.js';
-import { Character } from './character.js';
+import { ROOMS, ROOM_ORDER, type RoomId } from './rooms.js';
+import { Office3D } from './scene3d.js';
 import { OfficeSocket, type ActivityEvent, type SessionInfo } from './socket.js';
 
 const canvas = document.getElementById('office') as HTMLCanvasElement;
-const c = canvas.getContext('2d')!;
+const roomLabels = document.getElementById('room-labels')!;
 
 const sessionNameEl = document.getElementById('session-name')!;
 const liveBadge = document.getElementById('live-badge')!;
@@ -17,14 +16,12 @@ const activityList = document.getElementById('activity-list')!;
 const legendGrid = document.getElementById('legend-grid')!;
 const autoFollow = document.getElementById('auto-follow') as HTMLInputElement;
 
-let origin: Origin = { x: 0, y: 0 };
-let currentRoom: RoomId = 'lobby';
-const character = new Character('lobby');
+const office = new Office3D(canvas, roomLabels);
 
+let currentRoom: RoomId = 'lobby';
 let sessions: SessionInfo[] = [];
 let liveSessionId: string | null = null;
 let activeSessionId = '';
-let connected = false;
 
 // ---- legend -----------------------------------------------------------------
 const LEGEND_SWATCH: Record<RoomId, string> = {
@@ -118,26 +115,17 @@ function addActivity(ev: ActivityEvent): void {
   while (activityList.children.length > 120) activityList.lastChild?.remove();
 }
 
-// ---- character bubble from the latest meaningful event ----------------------
-function updateBubble(ev: ActivityEvent): void {
-  if (ev.kind === 'assistant' && ev.label === 'thinking') character.setBubble('think', '생각 중');
-  else if (ev.room === 'po' && ev.question) character.setBubble('speak', ev.question);
-  else if (ev.kind === 'tool_call' && ev.tool) character.setBubble('speak', ev.tool);
-  else if (ev.kind === 'turn_end') character.setBubble('none', '');
-}
-
 function setRoom(room: string): void {
   if (!(room in ROOMS)) return;
   const r = room as RoomId;
   if (r === currentRoom) return;
   currentRoom = r;
-  if (autoFollow.checked) character.goTo(r);
+  if (autoFollow.checked) office.goToRoom(r);
 }
 
 // ---- socket -----------------------------------------------------------------
 const socket = new OfficeSocket({
   onStatus: (ok) => {
-    connected = ok;
     liveBadge.dataset.live = String(ok);
   },
   onCatchup: (f) => {
@@ -148,13 +136,12 @@ const socket = new OfficeSocket({
     for (const ev of f.events) addActivity(ev);
     const active = sessions.find((s) => s.sessionId === activeSessionId);
     sessionNameEl.textContent = active ? active.name : '세션';
-    setRoom(f.currentRoom);
-    character.goTo(currentRoom);
+    currentRoom = (f.currentRoom in ROOMS ? f.currentRoom : 'lobby') as RoomId;
+    office.goToRoom(currentRoom);
     renderFloors();
   },
   onEvent: (f) => {
     addActivity(f.event);
-    updateBubble(f.event);
     setRoom(f.currentRoom);
   },
   onSessions: (f) => {
@@ -165,52 +152,15 @@ const socket = new OfficeSocket({
 });
 
 // ---- render loop ------------------------------------------------------------
-function resize(): void {
-  const wrap = canvas.parentElement!;
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = wrap.clientWidth * dpr;
-  canvas.height = wrap.clientHeight * dpr;
-  c.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // Center the iso plan: midpoint of the grid is around (8.5, 7).
-  origin = { x: wrap.clientWidth / 2, y: wrap.clientHeight * 0.16 };
-}
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => office.resize());
 
 function frame(now: number): void {
-  const ctx: Ctx = { c, origin };
-  c.clearRect(0, 0, canvas.width, canvas.height);
-
-  drawFloors(ctx, currentRoom);
-
-  // Painter order: draw room furniture + character interleaved by depth so the
-  // character is occluded correctly. We approximate by drawing all furniture by
-  // room back-to-front, then the character last within/after its room's depth.
-  const ordered = [...ROOM_ORDER].sort((a, b) => {
-    const ra = ROOMS[a], rb = ROOMS[b];
-    return ra.gx + ra.gy - (rb.gx + rb.gy);
-  });
-  character.update(now);
-  let drew = false;
-  for (const id of ordered) {
-    drawFurniture(ctx, id, now);
-    const r = ROOMS[id];
-    if (!drew && character.depthKey <= r.gx + r.gy + r.w + r.h) {
-      character.draw(ctx, now);
-      drew = true;
-    }
-  }
-  if (!drew) character.draw(ctx, now);
-
+  office.render(now);
   highlightLegend();
-  // refresh relative times occasionally
   requestAnimationFrame(frame);
 }
 
 buildLegend();
-resize();
 socket.connect();
 requestAnimationFrame(frame);
-
-// periodic floor-time refresh
 setInterval(renderFloors, 15000);
-void connected;
