@@ -28,39 +28,44 @@ export const GLASS = { height: 2.2, post: 0.06, postEvery: 1.5, door: 1.2 } as c
 // ---- palette ----------------------------------------------------------------
 export const PALETTE = {
   clear: '#f4f5f7',
-  floor: '#f6f7f9',
-  floorSide: '#dfe2e7',
-  wall: '#eef0f3',
-  wallCap: '#cfd4dc',
-  frame: '#cfd4dc',
-  glass: '#dbe8f3',
-  windowGlass: '#d6e6f4',
-  lightWood: '#d8bc94',
-  lightWoodDark: '#c4a47c',
-  white: '#f3f3f5',
-  offWhite: '#ebe9e4',
-  sage: '#a9bcae',
-  warmGray: '#b9b4ab',
-  navy: '#5b6b8c',
-  metal: '#c9ced6',
+  // ===== Palette: monochrome base + powder-blue secondary + burnt-orange pop =====
+  // Editorial / hip look: greyscale neutrals carry the room, powder blue is the
+  // calm secondary (rugs, upholstery), burnt orange is the ONE punchy accent used
+  // sparingly. No pink/pastel kitsch.
+  floor: '#f5f6f7',
+  floorSide: '#d9dde1',
+  wall: '#eef0f2',
+  wallCap: '#cbd0d6',
+  frame: '#3a3d42',          // crisp charcoal frames = hip editorial edge
+  glass: '#dce9f2',
+  windowGlass: '#d9e8f4',
+  lightWood: '#cdb897',       // muted oak (kept as a warm neutral counterpoint)
+  lightWoodDark: '#b89f7d',
+  white: '#f2f3f4',
+  offWhite: '#e7e9eb',        // cool off-white, not warm cream
+  sage: '#aeb7bd',            // de-saturated to a cool grey-green
+  warmGray: '#b4b7bb',        // now a neutral cool grey
+  navy: '#3f4b63',            // deeper, less saturated
+  metal: '#c7ccd2',
   metalMid: '#8f99a6',
-  metalDark: '#4a5160',
-  serverRack: '#3a3f4b',
-  plant: '#6aa77f',
-  accent: '#f08a4b',
-  led: '#5ec8ff',
-  screen: '#2b3242',
-  rug: '#ebe5da',
-  rugDark: '#ddd4c6',
-  aoColor: '#3a3f4b',
-  pavement: '#e4e6ea',
-  // kitsch pops — used in small doses
-  pink: '#f4a6c0',
-  hotPink: '#ff5fa2',
-  butter: '#f6d365',
-  mint: '#9edfc4',
-  lilac: '#c3b1e1',
-  sky: '#9cc9f0',
+  metalDark: '#454b55',
+  serverRack: '#363b44',
+  plant: '#7a9a86',           // muted sage-green planting
+  accent: '#e8833f',          // burnt orange — the single punchy pop
+  led: '#8fd0f2',             // powder-blue server LEDs (match the palette)
+  screen: '#2b3038',
+  rug: '#e4e7ea',
+  rugDark: '#d2d7db',
+  aoColor: '#363b44',
+  pavement: '#e2e4e8',
+  // former kitsch pops — all remapped onto the mono + powder-blue + orange system
+  sky: '#bcdcf2',            // ★ powder blue — the user's favourite, secondary accent
+  skyDeep: '#9ec7ea',        // slightly deeper powder blue for variation
+  pink: '#bcdcf2',           // remapped → powder blue (was kitsch pink)
+  hotPink: '#e8833f',        // remapped → burnt orange (was neon pink)
+  butter: '#e4e7ea',         // remapped → neutral grey (was yellow)
+  mint: '#aeb7bd',           // remapped → cool grey-green
+  lilac: '#c7ccd2',          // remapped → cool grey
 } as const;
 
 /** Kenney furniture material name → palette color (exact names, verified from

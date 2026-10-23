@@ -133,8 +133,8 @@ export class Office3D {
   private activeRoom: RoomId = 'lobby';
   private onBed = false;
   private catBedPos = new THREE.Vector3();
-  /** the founder's boss cat, which cycles roll → play → sleep */
-  private boss: { roll: THREE.Group; tip: THREE.Group; cat: THREE.Group; tail: THREE.Group } | null = null;
+  /** the founder's boss cat (upright) playing with a ball */
+  private boss: { roll: THREE.Group; tip: THREE.Group; cat: THREE.Group; tail: THREE.Group; ball: THREE.Mesh } | null = null;
   private lastNow = 0;
 
   private zoneSlabs = new Map<string, THREE.Mesh>();
@@ -176,10 +176,9 @@ export class Office3D {
     this.buildFloor();
     this.buildExteriorWalls();
     this.buildGlass();
-    // Exterior city/road backdrop removed — the street looked odd through the
-    // windows. (buildCity() kept below for reference; a sky/sunset backdrop
-    // could replace it later.)
-    // this.buildCity();
+    // Exterior backdrop removed entirely — both the city/road and the sunset
+    // looked bad through the windows. Keep the outside empty (clean background).
+    // this.buildSkyBackdrop();
     this.buildCharacter();
     this.setupComposer();
     this.setupInput(canvas);
@@ -443,6 +442,61 @@ export class Office3D {
         }
       }
     }
+  }
+
+  // ---- sunset sky + distant building silhouettes (behind the back walls) -------
+  /** A soft sunset gradient backdrop seen through the windows, with a low band of
+      flat building silhouettes. No road / ground clutter — just a calm skyline.
+      Palette-matched: warm burnt-orange horizon fading up into powder-blue dusk. */
+  private buildSkyBackdrop(): void {
+    // 1) gradient sky canvas → texture (orange horizon → powder-blue top)
+    const cv = document.createElement('canvas');
+    cv.width = 16; cv.height = 256;
+    const g = cv.getContext('2d')!;
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0.0, '#bcd' + 'cf2');      // top: powder blue (dusk)
+    grad.addColorStop(0.45, '#d9e2ec');          // pale band
+    grad.addColorStop(0.72, '#f0c69a');          // warm haze
+    grad.addColorStop(1.0, '#e8833f');           // horizon: burnt orange glow
+    g.fillStyle = grad; g.fillRect(0, 0, 16, 256);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const skyMat = new THREE.MeshBasicMaterial({ map: tex, depthWrite: false, fog: false });
+
+    // 2) two big sky planes standing just beyond the two back walls, facing in
+    const W = 60, H = 26;
+    const makePlane = (): THREE.Mesh => new THREE.Mesh(new THREE.PlaneGeometry(W, H), skyMat);
+    // behind z=0 wall (faces +z toward the room)
+    const pZ = makePlane(); pZ.position.set(14, H / 2 - 3, -14); this.scene.add(pZ);
+    // behind x=0 wall (faces +x), rotated
+    const pX = makePlane(); pX.rotation.y = Math.PI / 2; pX.position.set(-14, H / 2 - 3, 10); this.scene.add(pX);
+
+    // 3) flat building silhouettes — a low skyline band, de-saturated dusk blue,
+    //    no windows/detail so it stays quiet behind the interior.
+    const silMat = new THREE.MeshBasicMaterial({ color: '#6f7f93', fog: false });
+    const silMatDark = new THREE.MeshBasicMaterial({ color: '#5a6a7e', fog: false });
+    const rng = (seed: number): number => { const x = Math.sin(seed * 999.7) * 1e4; return x - Math.floor(x); };
+    const skyline = (along: 'x' | 'z') => {
+      const group = new THREE.Group();
+      const span = 48;
+      let p = -10;
+      let i = 0;
+      while (p < span) {
+        const w = 1.4 + rng(i) * 2.6;
+        const h = 3 + rng(i + 0.5) * 9;
+        const mt = rng(i + 0.3) > 0.5 ? silMat : silMatDark;
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.4), mt);
+        if (along === 'x') b.position.set(p, h / 2 - 2, -12.5);
+        else b.position.set(-12.5, h / 2 - 2, p);
+        if (along === 'z') b.rotation.y = Math.PI / 2;
+        group.add(b);
+        p += w + 0.6 + rng(i + 0.7) * 1.2;
+        i++;
+      }
+      this.scene.add(group);
+    };
+    skyline('x'); // skyline behind the z=0 wall
+    skyline('z'); // skyline behind the x=0 wall
   }
 
   // ---- the city behind the back walls ------------------------------------------
@@ -840,14 +894,16 @@ export class Office3D {
         cat.add(mesh(new THREE.SphereGeometry(0.025, 8, 6), bow, 0, 0.48, 0.18));
         const tip = new THREE.Group();
         tip.add(cat);
-        tip.rotation.z = Math.PI / 2;     // lie down: head toward −x
-        tip.position.x = 0.42;            // center the body over the pivot
+        // UPRIGHT like the agent cat (no lying on its face). A small toy ball
+        // sits in front; the render loop makes the boss bat at it (play).
+        const ball = mesh(new THREE.SphereGeometry(0.09, 16, 12), mat(PALETTE.accent, 0.5), 0, 0.09, 0.3);
+        tip.add(ball);
         const roll = new THREE.Group();
         roll.add(tip);
-        roll.position.y = 0.19;
+        roll.position.y = 0;
         roll.scale.setScalar(0.95);
         g.add(roll);
-        this.boss = { roll, tip, cat, tail };
+        this.boss = { roll, tip, cat, tail, ball };
         passive = true;
         break;
       }
@@ -869,38 +925,57 @@ export class Office3D {
   }
 
   private async buildCar(x: number, z: number, y: number, yaw: number, id: string, zone: string): Promise<void> {
-    // Kenney cars are chunky toys: size by HEIGHT (1.4m) so the car reads as a
-    // car next to 0.75m desks; length comes out ≈3.2m. Model length is on z.
-    const raw = await this.models.measure(V('sedan-sports'));
+    // Sportier model + size by LENGTH so it reads as a low, long sports car on
+    // the showroom podium. hatchback-sports has the most sports-coupe silhouette
+    // of the Kenney set. Length is the model's longest horizontal axis.
+    const CAR = V('hatchback-sports');
+    const raw = await this.models.measure(CAR);
     if (!raw) return;
-    const s = 1.4 / raw.size.y;
-    const placed = await this.models.place(V('sedan-sports'), s);
+    const lenAxis = Math.max(raw.size.x, raw.size.z);
+    const s = 4.0 / lenAxis; // ~4.0 m long sports car
+    const placed = await this.models.place(CAR, s);
     if (!placed) return;
     placed.group.position.set(x, y + 0.1, z);
     placed.group.rotation.y = yaw;
-    this.tintCarBlue(placed.group);
+    this.tintCarBody(placed.group);
     this.scene.add(placed.group);
     this.addFootprint(id, zone, 'car', x, z, placed.size.x, placed.size.z, 'E', placed.size.y, false);
   }
 
-  /** Keep the user-set blue on the car body; skip glass/wheels/lights/tiny. */
-  private tintCarBlue(car: THREE.Group): void {
+  /** Recolor ONLY the car's body to powder blue, keeping the Kenney colormap
+      texture (so wheels/windows/lights keep their detail). We multiply the body
+      material's color by the sky tint instead of flat-replacing it, and keep the
+      map — glass/wheels/lights/tiny meshes are skipped. */
+  private tintCarBody(car: THREE.Group): void {
+    const sky = new THREE.Color(PALETTE.sky);
     const box3 = new THREE.Box3();
     const size = new THREE.Vector3();
-    tintMeshes(car, 0x2f6ad0, (m) => {
+    car.traverse((obj) => {
+      const m = obj as THREE.Mesh;
+      if (!m.isMesh) return;
       const name = (m.name + ' ' + (Array.isArray(m.material) ? '' : (m.material?.name ?? ''))).toLowerCase();
-      if (/glass|window|light|wheel|tire|tyre/.test(name)) return false;
-      const matAny = Array.isArray(m.material) ? m.material[0] : m.material;
-      const mStd = matAny as THREE.MeshStandardMaterial | undefined;
-      if (mStd && (mStd.transparent || (mStd.opacity !== undefined && mStd.opacity < 0.95))) return false;
+      if (/glass|window|light|wheel|tire|tyre/.test(name)) return;
+      // skip tiny meshes (trim, handles) so only the big body panels recolor
       if (m.geometry) {
         m.geometry.computeBoundingBox();
         if (m.geometry.boundingBox) {
           box3.copy(m.geometry.boundingBox); box3.getSize(size);
-          if (Math.max(size.x, size.y, size.z) < 0.25) return false;
+          if (Math.max(size.x, size.y, size.z) < 0.3) return;
         }
       }
-      return true;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      const recolored = mats.map((src) => {
+        const c = (src as THREE.MeshStandardMaterial).clone();
+        // DROP the colormap on body panels and paint flat sky-blue. (Multiplying
+        // the sky tint over Kenney's colormap turned the car muddy green — the
+        // texture's base car color was tinting through. Removing the map gives a
+        // clean powder-blue body; wheels/glass/lights are skipped above so they
+        // keep their detail.)
+        if ('map' in c) { c.map = null; c.needsUpdate = true; }
+        if ('color' in c && c.color) c.color.copy(sky);
+        return c;
+      });
+      m.material = recolored.length === 1 ? recolored[0] : recolored;
     });
   }
 
@@ -1191,41 +1266,34 @@ export class Office3D {
     // boss cat: rolls side → belly-up → other side and back, squirming as it goes
     if (this.boss) {
       const t = now / 1000;
-      // Behaviour cycle: roll on the bed (8s) → sit up & play (7s) → curl up and
-      // sleep (9s), then repeat. A short eased blend hides the transitions.
-      const ROLL = 8, PLAY = 7, SLEEP = 9, CYCLE = ROLL + PLAY + SLEEP;
-      const p = t % CYCLE;
-      const { roll, tip, cat, tail } = this.boss;
+      // The boss cat stays UPRIGHT (same orientation as the agent cat) and plays
+      // with a ball: mostly batting at it (ball bounces), with an occasional
+      // little sit-and-watch beat. No lying face-down.
+      const { roll, tip, cat, tail, ball } = this.boss;
+      roll.rotation.z = 0;      // always upright
+      roll.rotation.x = 0;
+      cat.scale.setScalar(0.95);
 
-      if (p < ROLL) {
-        // --- 1) LAZING on the bed: lies on its side, gently shifts weight ---
-        // (small, cozy wiggle — NOT a tumble; keep rotation.x tiny)
-        const sway = Math.sin(t * 0.8);
-        roll.rotation.z = Math.PI / 2;              // lying on side (base pose)
-        roll.rotation.x = sway * 0.18;              // subtle roll, no flipping
-        roll.position.y = 0.17 + Math.abs(sway) * 0.015;
-        tip.rotation.y = Math.sin(t * 0.5) * 0.15;  // slow head shift
-        cat.scale.setScalar(0.95);
-        tail.rotation.z = Math.sin(t * 1.6) * 0.3;  // slow tail wave
-      } else if (p < ROLL + PLAY) {
-        // --- 2) PLAYING: sits upright and bats at something, small hops ---
-        const q = p - ROLL;
-        roll.rotation.z = 0;                         // upright
-        roll.rotation.x = 0;
-        roll.position.y = 0.2 + Math.abs(Math.sin(q * 2.6)) * 0.035; // gentle hops
-        tip.rotation.y = Math.sin(q * 1.8) * 0.35;   // swatting left/right
-        cat.scale.setScalar(0.95);
-        tail.rotation.z = Math.sin(q * 6) * 0.6;     // playful tail flicks
+      const PLAY = 9, REST = 4, CYCLE = PLAY + REST;
+      const p = t % CYCLE;
+      if (p < PLAY) {
+        // batting the ball: body hops/leans, ball bounces toward/away
+        const q = p;
+        roll.position.y = Math.abs(Math.sin(q * 3.0)) * 0.04;      // little hops
+        tip.rotation.y = Math.sin(q * 2.2) * 0.4;                  // swat L/R
+        tail.rotation.z = Math.sin(q * 7) * 0.8;                   // excited tail
+        // ball: bounces in height and skitters forward/back in z
+        ball.position.y = 0.09 + Math.abs(Math.sin(q * 5.5)) * 0.18;
+        ball.position.z = 0.3 + Math.sin(q * 2.2) * 0.14;
+        ball.visible = true;
       } else {
-        // --- 3) SLEEPING: curled up, slow breathing, tail barely twitches ---
-        const q = p - ROLL - PLAY;
-        roll.rotation.z = Math.PI / 2;               // lying down
-        roll.rotation.x = 0.1;
-        roll.position.y = 0.15;
-        tip.rotation.y = 0;
-        const breathe = 1 + Math.sin(q * 1.4) * 0.03; // gentle breathing
-        cat.scale.set(0.95 * breathe, 0.95 / breathe, 0.95);
-        tail.rotation.z = Math.sin(q * 0.9) * 0.15;  // lazy twitch
+        // brief sit & watch
+        const q = p - PLAY;
+        roll.position.y = 0;
+        tip.rotation.y = Math.sin(q * 0.8) * 0.12;
+        tail.rotation.z = Math.sin(q * 1.4) * 0.3;
+        ball.position.y = 0.09;
+        ball.position.z = 0.3;
       }
     }
     if (moved || this.wasMoving) this.renderer.shadowMap.needsUpdate = true;
