@@ -1476,8 +1476,9 @@ export class Office3D {
     const hud = new Hud(this.labelRoot, '', 'crew');
     const c = Object.assign(new CrewCat(m.id, root, cat, tail, hud), { spawnAt: performance.now() });
     c.parts = parts;
-    if (m.kind === 'workflow' && this.elev) {
-      // ding — the doors open and the helper steps out
+    if (this.elev) {
+      // Everyone commutes by ELEVATOR (matches the reference office). ding — the
+      // doors open and the cat steps out of the cab.
       c.viaElevator = true;
       c.pos.copy(this.elevIn);
       c.root.rotation.y = this.elevatorYaw();
@@ -2078,8 +2079,12 @@ export class Office3D {
       l.el.style.transform = `translate(-50%,-100%) translate(${x}px,${y}px)`;
       // hoverOnly labels fade with hover; always-on labels (room names) stay visible.
       l.el.style.opacity = l.hoverOnly ? (this.hoverZone === l.zone ? '1' : '0') : '1';
-      // a room label right under the cat's bubble would collide with it: fade it out
-      if (this.hudSpots.some(([hx, hy]) => Math.abs(x - hx) < 130 && y > hy - 110 && y < hy + 40)) l.el.style.opacity = '0.12';
+      // a room label right under the cat's bubble would collide with it: fade it
+      // out — EXCEPT the founder room, which must always stay clearly readable.
+      if (l.zone !== 'founder'
+          && this.hudSpots.some(([hx, hy]) => Math.abs(x - hx) < 130 && y > hy - 110 && y < hy + 40)) {
+        l.el.style.opacity = '0.12';
+      }
       l.el.dataset.active = String(l.zone === activeZone);
     }
     this.agentHud.update();

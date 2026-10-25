@@ -25,9 +25,16 @@ const IDLE_MS = 60_000;      // no events at all for a minute
 const AFTER_TURN_MS = 4000;  // a short beat after a turn ends
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 let resting = false;
+/** Are we watching the session that is actually live right now? Only the live
+    session should ever show "resting / done" states — a past session we're just
+    browsing should stay neutral (no "쉬는 중" over a cat that isn't working). */
+function watchingLive(): boolean {
+  return liveSessionId != null && liveSessionId === activeSessionId;
+}
 function scheduleRest(ms: number): void {
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
+    if (!watchingLive()) return; // never nap while browsing a past session
     resting = true;
     office.setIdle(true);
     office.showBubble({ mode: 'sleep', icon: '💤', title: '쉬는 중… zZ', since: Date.now() });
@@ -41,13 +48,49 @@ function noteActivity(ev?: ActivityEvent): void {
     office.showBubble(null);
     office.goToRoom(currentRoom);
   }
-  scheduleRest(ev?.kind === 'turn_end' ? AFTER_TURN_MS : IDLE_MS);
+  // Only arm the rest timer for the live session. A finished (past) session
+  // shouldn't keep flashing "한숨 돌리는 중 / 쉬는 중".
+  if (watchingLive()) scheduleRest(ev?.kind === 'turn_end' ? AFTER_TURN_MS : IDLE_MS);
 }
 
 let currentRoom: RoomId = 'lobby';
 let sessions: SessionInfo[] = [];
 let liveSessionId: string | null = null;
 let activeSessionId = '';
+
+// ---- running stats (현황) ----------------------------------------------------
+// Aggregated per active session; reset on catch-up when the session switches.
+const statEls = {
+  actions: document.getElementById('stat-actions')!,
+  edits: document.getElementById('stat-edits')!,
+  tests: document.getElementById('stat-tests')!,
+  commits: document.getElementById('stat-commits')!,
+  room: document.getElementById('stat-room')!,
+};
+const stats = { actions: 0, edits: 0, tests: 0, commits: 0 };
+const EDIT_TOOLS = new Set(['str_replace', 'fs_write', 'fs_append']);
+function resetStats(): void {
+  stats.actions = stats.edits = stats.tests = stats.commits = 0;
+  renderStats();
+}
+function tallyEvent(ev: ActivityEvent): void {
+  if (ev.kind === 'tool_call') {
+    stats.actions++;
+    if (ev.tool && EDIT_TOOLS.has(ev.tool)) stats.edits++;
+  }
+  if (ev.kind === 'tool_result') {
+    if (ev.tag === 'test') stats.tests++;
+    if (ev.tag === 'commit' && ev.ok) stats.commits++;
+  }
+}
+function renderStats(): void {
+  statEls.actions.textContent = String(stats.actions);
+  statEls.edits.textContent = String(stats.edits);
+  statEls.tests.textContent = String(stats.tests);
+  statEls.commits.textContent = String(stats.commits);
+  const r = currentRoom in ROOMS ? ROOMS[currentRoom].label : '—';
+  statEls.room.textContent = r;
+}
 
 // ---- legend -----------------------------------------------------------------
 const LEGEND_SWATCH: Partial<Record<RoomId, string>> = {
@@ -224,26 +267,36 @@ const socket = new OfficeSocket({
     liveSessionId = f.liveSessionId;
     activeSessionId = f.sessionId;
     activityList.textContent = '';
-    for (const ev of f.events) addActivity(ev);
+    resetStats(); // new session (or reconnect) → recount from its catch-up
+    for (const ev of f.events) { addActivity(ev); tallyEvent(ev); }
     const active = sessions.find((s) => s.sessionId === activeSessionId);
     sessionNameEl.textContent = active ? active.name : '세션';
-    office.setAgentName(active ? `삼색이 · ${active.name}` : '삼색이');
+    office.setAgentName(active ? `에이전트냥 · ${active.name}` : '에이전트냥');
     // restore the bubble from recent history (an old, finished session stays quiet)
     thinkingSince = 0;
     office.showBubble(null);
-    const recent = f.events.filter((ev) => Date.now() - ev.ts < 10 * 60_000);
-    for (const ev of recent) applyBubble(ev);
+    // Replay recent bubbles only for the LIVE session. For a past session we're
+    // just browsing, keep the cat neutral (no stale "완료 / 쉬는 중" bubble).
+    if (watchingLive()) {
+      const recent = f.events.filter((ev) => Date.now() - ev.ts < 10 * 60_000);
+      for (const ev of recent) applyBubble(ev);
+    } else {
+      office.showBubble(null);
+    }
     currentRoom = (f.currentRoom in ROOMS ? f.currentRoom : 'lobby') as RoomId;
     office.goToRoom(currentRoom);
-    noteActivity(f.events.at(-1)); // a finished turn → nap soon
+    noteActivity(f.events.at(-1)); // (only arms rest for the live session)
+    renderStats();
     renderFloors();
   },
   onEvent: (f) => {
     noteActivity(f.event); // wakes a napping agent first
     addActivity(f.event);
+    tallyEvent(f.event);
     applyBubble(f.event);
     react(f.event);
     setRoom(f.currentRoom);
+    renderStats();
   },
   onCrew: (f) => {
     office.setCrew(f.members);

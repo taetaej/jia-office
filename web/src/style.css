@@ -51,10 +51,43 @@ body {
 .brand-mark { color: hsl(var(--ink)); font-size: 12px; }
 .brand-title { font-weight: 700; letter-spacing: 0.2px; color: hsl(var(--ink)); }
 .session-name {
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 260px;
   color: hsl(var(--muted));
   font-size: 12px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* header running-stats — minimal, borderless, separated by thin dividers
+   (Linear/Vercel-style metric row). Number on top, small uppercase label under. */
+.stats {
+  flex: 1;
+  display: flex; align-items: stretch; gap: 0;
+  overflow-x: auto;
+}
+.stat {
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 1px;
+  padding: 0 18px;
+  white-space: nowrap;
+  border-left: 1px solid hsl(var(--border));
+}
+.stat:first-child { border-left: 0; padding-left: 4px; }
+.stat b {
+  font-size: 16px; font-weight: 650; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--fg));
+}
+.stat i {
+  font-style: normal; font-size: 9px; font-weight: 600;
+  letter-spacing: 0.8px; text-transform: uppercase;
+  color: hsl(var(--faint, var(--muted)));
+}
+.stat.stat-room { margin-left: auto; }
+.stat.stat-room b {
+  font-size: 13px; font-weight: 700;
+  color: hsl(var(--accent, 24 80% 55%));
 }
 .live-badge {
   display: flex; align-items: center; gap: 6px;
