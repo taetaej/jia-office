@@ -177,6 +177,11 @@ function lookAt(hours: number): TimeLook {
 /** The main street door crew cats arrive by and leave through (front of the side corridor). */
 const DOOR = new THREE.Vector3(18, 0, 19.7);
 
+/** What the boss cat is doing between walks. */
+type BossPose = 'walk' | 'sleep' | 'stretch' | 'groom' | 'knead' | 'roll' | 'loaf' | 'look' | 'type' | 'play' | 'snack' | 'greet' | 'sit' | 'stand';
+/** One leg of a boss activity: walk `path`, then hold `pose` for `secs`. */
+interface BossStep { path: THREE.Vector3[]; pose: BossPose; secs: number; icon?: string; title?: string; yaw?: number }
+
 export class Office3D {
   readonly scene = new THREE.Scene();
   private readonly renderer: THREE.WebGLRenderer;
@@ -198,7 +203,6 @@ export class Office3D {
   private catBedPos = new THREE.Vector3();
   /** the founder's boss cat (upright) playing with a ball */
   private boss: { roll: THREE.Group; tip: THREE.Group; cat: THREE.Group; tail: THREE.Group; ball: THREE.Mesh; root: THREE.Group; parts: CatParts } | null = null;
-  private bossPhase = '';
   private lastNow = 0;
 
   private zoneSlabs = new Map<string, THREE.Mesh>();
@@ -2029,51 +2033,185 @@ export class Office3D {
     this.renderer.shadowMap.needsUpdate = true;
   }
 
-  // ---- boss cat: a cute day on the bed ---------------------------------------
-  private static readonly BOSS_ROUTINE: Array<{ id: string; secs: number; icon: string; title: string }> = [
-    { id: 'sleep', secs: 10, icon: '💤', title: 'zZ… 꿀잠' },
-    { id: 'stretch', secs: 2.6, icon: '🙆', title: '기지개 쭈욱~' },
-    { id: 'groom', secs: 5, icon: '🧼', title: '세수하는 중' },
-    { id: 'knead', secs: 5, icon: '💕', title: '꾹꾹이' },
-    { id: 'roll', secs: 4.5, icon: '😸', title: '뒹굴뒹굴' },
-    { id: 'loaf', secs: 7, icon: '🍞', title: '식빵 굽는 중' },
-  ];
+  // ---- boss cat: a free-roaming day ----------------------------------------------
+  // Instead of one fixed loop on the bed, the boss picks its next activity at
+  // random (weighted by the time of day, never the same twice in a row): naps,
+  // grooming and 꾹꾹이 on the bed, the cat tower, pretending to work at the
+  // desk, a lounge-chair nap, chasing a ball, or a patrol round the office.
 
-  private bossIdle(now: number): void {
+  /** Spots in/around the founder office (world coords; y = standing height). */
+  private bossSpots(): Record<string, THREE.Vector3> {
+    const f = zoneById('founder')!;
+    const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    return {
+      hub: v(f.x + 3.7, 0, f.z + 2.3),          // open floor between desk, bed and lounge
+      bedSide: v(f.x + 4.4, 0, f.z + 3.6),
+      treeBase: v(f.x + 5.3, 0, f.z + 2.3),
+      treeTop: v(f.x + 6.18, 1.47, f.z + 1.66),  // the cat tower's top cushion
+      deskWay: v(f.x + 3.3, 0, f.z + 0.65),
+      desk: v(f.x + 2.2, 0.5, f.z + 0.88),       // the boss chair
+      loungeWay: v(f.x + 1.3, 0, f.z + 3.5),
+      lounge: v(f.x + 1.3, 0.44, f.z + 4.4),
+      play: v(f.x + 2.1, 0, f.z + 2.9),
+      door: v(f.x + 0.5, 0, f.z + 3.2),
+    };
+  }
+
+  /** The patrol: through 비서실, down the side corridor, across the lobby to the café. */
+  private static readonly PATROL: Array<[number, number]> = [[20.6, 16.4], [18, 17.2], [16.5, 15.6], [12, 15.6], [5.4, 15.6], [3.3, 16.0]];
+
+  private bossPlan: BossStep[] = [];
+  private bossStep: BossStep | null = null;
+  private bossStepStart = 0;
+  private bossLastAct = '';
+
+  /** A path from wherever the boss is now (bed, tower, chair, out on patrol) to `dest`. */
+  private bossRoute(dest: THREE.Vector3[]): THREE.Vector3[] {
+    const sp = this.bossSpots();
+    const at = this.bossPos;
+    const goal = dest.at(-1);
+    if (goal && at.distanceTo(goal) < 0.1) return []; // already there (e.g. staying on the bed)
+    const f = zoneById('founder')!;
+    const out: THREE.Vector3[] = [];
+    if (at.x < f.x - 0.05) {
+      // out on patrol: retrace the patrol back to the founder door
+      const pts = Office3D.PATROL.map(([x, z]) => new THREE.Vector3(x, 0, z));
+      let near = 0;
+      pts.forEach((p, i) => { if (p.distanceTo(at) < pts[near].distanceTo(at)) near = i; });
+      out.push(...pts.slice(0, near + 1).reverse(), sp.door);
+    } else if (at.y > 0.3) {
+      // hop down first from the bed / tower / chair
+      const d = (p: THREE.Vector3) => Math.hypot(p.x - at.x, p.z - at.z);
+      const from = d(sp.treeTop) < 0.3 ? sp.treeBase : d(sp.desk) < 0.3 ? sp.deskWay : d(sp.lounge) < 0.3 ? sp.loungeWay : sp.bedSide;
+      out.push(from.clone());
+    }
+    out.push(sp.hub.clone(), ...dest.map((p) => p.clone()));
+    return out;
+  }
+
+  /** Pick the next activity and queue its steps. */
+  private bossPlanNext(now: number): void {
+    const sp = this.bossSpots();
+    const home = this.bossHome!;
+    const d = new Date();
+    const hour = this.fixedHour ?? d.getHours() + d.getMinutes() / 60;
+    const night = hour >= 22 || hour < 7;
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    const acts: Array<{ id: string; w: number; steps: () => BossStep[] }> = [
+      { id: 'bedNap', w: night ? 6 : 2, steps: () => [
+        { path: this.bossRoute([sp.bedSide, home]), pose: 'sleep', secs: rnd(14, 22), icon: '💤', title: 'zZ… 꿀잠' },
+        { path: [], pose: 'stretch', secs: 2.6, icon: '🙆', title: '기지개 쭈욱~' },
+      ] },
+      { id: 'bedLoaf', w: night ? 1 : 1.4, steps: () => [
+        { path: this.bossRoute([sp.bedSide, home]), pose: 'loaf', secs: rnd(7, 11), icon: '🍞', title: '식빵 굽는 중' },
+        { path: [], pose: 'groom', secs: 5, icon: '🧼', title: '세수하는 중' },
+      ] },
+      { id: 'bedKnead', w: night ? 0.6 : 1.3, steps: () => [
+        { path: this.bossRoute([sp.bedSide, home]), pose: 'knead', secs: 5, icon: '💕', title: '꾹꾹이' },
+        { path: [], pose: 'roll', secs: 4.5, icon: '😸', title: '뒹굴뒹굴' },
+      ] },
+      { id: 'tower', w: night ? 0.3 : 1.5, steps: () => [
+        { path: this.bossRoute([sp.treeBase, sp.treeTop]), pose: 'look', secs: rnd(8, 11), icon: '🐾', title: '캣타워에서 사무실 감시 중', yaw: -Math.PI * 0.25 },
+        { path: [], pose: 'groom', secs: 4, icon: '🧼', title: '세수하는 중', yaw: -Math.PI * 0.25 },
+      ] },
+      { id: 'desk', w: night ? 0.2 : 1.2, steps: () => [
+        { path: this.bossRoute([sp.deskWay, sp.desk]), pose: 'type', secs: rnd(8, 11), icon: '💼', title: '업무 보는 척', yaw: 0 },
+      ] },
+      { id: 'lounge', w: night ? 2 : 1, steps: () => [
+        { path: this.bossRoute([sp.loungeWay, sp.lounge]), pose: 'sleep', secs: rnd(10, 15), icon: '😴', title: '소파에서 낮잠', yaw: 0 },
+      ] },
+      { id: 'play', w: night ? 0.3 : 1.5, steps: () => [
+        { path: this.bossRoute([sp.play]), pose: 'play', secs: rnd(8, 11), icon: '⚽', title: '공놀이 중!', yaw: Math.PI / 2 },
+      ] },
+      { id: 'patrol', w: night ? 0.1 : 1, steps: () => {
+        const pts = Office3D.PATROL.map(([x, z]) => new THREE.Vector3(x, 0, z));
+        return [
+          { path: this.bossRoute([sp.door, pts[0]]), pose: 'greet', secs: 2.6, icon: '👋', title: '비서냥 수고해~', yaw: Math.PI },
+          { path: pts.slice(1), pose: 'snack', secs: 4.5, icon: '🍩', title: '간식 순찰', yaw: Math.PI },
+          { path: [...pts.slice(0, -1).reverse(), sp.door, sp.hub], pose: 'stand', secs: 1.2, icon: '😼', title: '순찰 끝!' },
+        ];
+      } },
+    ];
+    const pool = acts.filter((a) => a.id !== this.bossLastAct);
+    let r = Math.random() * pool.reduce((n, a) => n + a.w, 0);
+    const pick = pool.find((a) => (r -= a.w) <= 0) ?? pool[0];
+    this.bossLastAct = pick.id;
+    this.bossPlan = pick.steps();
+    this.bossStep = null;
+    void now;
+  }
+
+  /** Free-roaming mode: walk each step's path, then hold its pose for a while. */
+  private bossFree(dt: number, now: number): boolean {
+    const b = this.boss!;
+    if (!this.bossStep && !this.bossPath.length) {
+      if (!this.bossPlan.length) this.bossPlanNext(now);
+      this.bossStep = this.bossPlan.shift() ?? null;
+      if (!this.bossStep) return false;
+      this.bossPath = this.bossStep.path;
+      this.bossStepStart = 0;
+    }
+    const moving = this.bossWalk(dt, now);
+    if (moving) return true;
+    const step = this.bossStep!;
+    if (!this.bossStepStart) {
+      this.bossStepStart = now;
+      if (step.yaw != null) b.root.rotation.y = step.yaw;
+      if (step.title) this.bossHud.show({ mode: 'sleep', icon: step.icon ?? '🐱', title: step.title, since: Date.now() });
+    }
+    const t = (now - this.bossStepStart) / 1000;
+    this.bossPose(step.pose, Math.min(1, t / step.secs), now);
+    if (t >= step.secs) this.bossStep = null;
+    return false;
+  }
+
+  /** Walk along bossPath (hopping up/down to the path points' heights). */
+  private bossWalk(dt: number, now: number): boolean {
+    if (!this.bossPath.length) return false;
+    const b = this.boss!;
+    const target = this.bossPath[0];
+    const dx = target.x - this.bossPos.x, dz = target.z - this.bossPos.z, dy = target.y - this.bossPos.y;
+    const dist = Math.hypot(dx, dz) || 1e-6;
+    const len = 2.2 * dt;
+    if (dist <= len) { this.bossPos.copy(target); this.bossPath.shift(); }
+    else { this.bossPos.x += (dx / dist) * len; this.bossPos.z += (dz / dist) * len; this.bossPos.y += dy * Math.min(1, len / dist); }
+    if (dist > 0.02) b.root.rotation.y = Math.atan2(dx, dz);
+    this.bossPose('walk', 0, now);
+    return true;
+  }
+
+  /** Set the boss cat's pose. `k` is 0..1 through the current step. */
+  private bossPose(pose: BossPose, k: number, now: number): void {
     const b = this.boss!;
     const p = b.parts;
-    const routine = Office3D.BOSS_ROUTINE;
-    const total = routine.reduce((n, r) => n + r.secs, 0);
-    let t = (now / 1000) % total;
-    let phase = routine[0];
-    for (const r of routine) { if (t < r.secs) { phase = r; break; } t -= r.secs; }
-    if (phase.id !== this.bossPhase) {
-      this.bossPhase = phase.id;
-      this.bossHud.show({ mode: 'sleep', icon: phase.icon, title: phase.title, since: Date.now() });
-    }
-    // neutral, then the phase's pose
     b.roll.rotation.set(0, 0, 0);
     b.roll.position.set(0, 0, 0);
     b.tip.rotation.set(0, 0, 0);
     b.tip.position.set(0, 0, 0);
     resetPose(p);
     b.cat.scale.setScalar(0.95);
+    b.ball.visible = false;
     const s = now / 1000;
-    switch (phase.id) {
+    switch (pose) {
+      case 'walk':
+        b.roll.position.y = Math.abs(Math.sin(now / 95)) * 0.05;
+        p.tail.rotation.z = Math.sin(now / 200) * 0.5;
+        blink(p, now, 7);
+        break;
       case 'sleep':
         sleepPose(p, now);
         p.cat.scale.multiplyScalar(0.95);
         p.tail.rotation.y = Math.sin(s * 0.6) * 0.08;
         break;
       case 'stretch': { // front down, bottom up, paws reaching forward
-        const k = Math.sin((t / phase.secs) * Math.PI);
-        b.tip.rotation.x = 0.55 * k;
-        p.cat.scale.set(0.95, 0.95 - 0.08 * k, 0.95 + 0.15 * k);
-        for (const pw of p.paws) { const r = pw.userData.rest as THREE.Vector3; pw.position.set(r.x, 0.06 + 0.1 * (1 - k), r.z + 0.16 * k); }
-        p.head.rotation.x = -0.35 * k;
-        closeEyes(p, k);
+        const e = Math.sin(k * Math.PI);
+        b.tip.rotation.x = 0.55 * e;
+        p.cat.scale.set(0.95, 0.95 - 0.08 * e, 0.95 + 0.15 * e);
+        for (const pw of p.paws) { const r = pw.userData.rest as THREE.Vector3; pw.position.set(r.x, 0.06 + 0.1 * (1 - e), r.z + 0.16 * e); }
+        p.head.rotation.x = -0.35 * e;
+        closeEyes(p, e);
         p.tail.rotation.z = 0.3;
-        p.tail.rotation.x = -1.2 * k;
+        p.tail.rotation.x = -1.2 * e;
         break;
       }
       case 'groom': { // licks a paw and washes its face in little circles
@@ -2106,44 +2244,71 @@ export class Office3D {
         p.tail.rotation.z = Math.sin(s * 6) * 0.8;
         break;
       }
-      default: { // 식빵: a perfect loaf, paws tucked, slow blinks
+      case 'loaf': // 식빵: a perfect loaf, paws tucked, slow blinks
         p.cat.scale.set(1.08, 0.7, 1.12);
         for (const pw of p.paws) pw.visible = false;
         closeEyes(p, Math.sin(s * 0.9) > 0.3 ? 0.9 : 0.4);
         p.tail.rotation.x = -1.4;
         p.tail.rotation.z = 1.1;
         p.head.rotation.x = 0.05;
+        break;
+      case 'look': // keeping watch from up high: head sweeps across the office
+        p.head.rotation.y = Math.sin(s * 0.7) * 0.7;
+        p.head.rotation.x = 0.15;
+        p.tail.rotation.z = Math.sin(s * 1.5) * 0.4;
+        p.tail.rotation.x = -1.0; // tail dangling off the cushion
+        blink(p, now, 7);
+        break;
+      case 'type': // paws tapping away at the keyboard, very important business
+        p.paws.forEach((pw, i) => {
+          const r = pw.userData.rest as THREE.Vector3;
+          pw.position.set(r.x, r.y + 0.1 + Math.max(0, Math.sin(now / 85 + i * 2)) * 0.035, r.z + 0.1);
+        });
+        p.head.rotation.x = 0.2;
+        p.head.rotation.z = Math.sin(s * 0.8) * 0.08;
+        blink(p, now, 7);
+        break;
+      case 'play': { // batting a ball that skitters about in front of it
+        b.ball.visible = true;
+        b.roll.position.y = Math.abs(Math.sin(s * 3)) * 0.05;
+        b.tip.rotation.y = Math.sin(s * 2.2) * 0.4;
+        p.tail.rotation.z = Math.sin(s * 7) * 0.8;
+        b.ball.position.set(Math.sin(s * 2.2) * 0.12, 0.09 + Math.abs(Math.sin(s * 5.5)) * 0.18, 0.32 + Math.sin(s * 1.3) * 0.12);
+        const r = p.paws[1].userData.rest as THREE.Vector3;
+        p.paws[1].position.set(r.x, r.y + Math.max(0, Math.sin(s * 5.5)) * 0.12, r.z + 0.1);
+        break;
       }
+      case 'snack': // head down, nibbling
+        p.head.rotation.x = 0.35 + Math.abs(Math.sin(s * 8)) * 0.12;
+        closeEyes(p, 0.6);
+        p.tail.rotation.z = Math.sin(s * 3) * 0.6;
+        break;
+      case 'greet':
+        greetPose(p, k, now);
+        break;
+      default: // 'stand' / 'sit'
+        p.tail.rotation.z = Math.sin(s * 1.4) * 0.35;
+        blink(p, now, 7);
     }
   }
 
   // ---- boss cat: approvals ----------------------------------------------------
-  /** The agent is waiting for an approval: the boss gets off the bed and sits at the desk. */
+  /** The agent is waiting for an approval: whatever it's doing, the boss heads to the desk. */
   bossReview(): void {
     if (!this.boss || this.bossMode === 'review' || this.bossMode === 'toDesk' || this.bossMode === 'stamp') return;
-    const f = zoneById('founder')!;
+    const sp = this.bossSpots();
     this.bossHome ??= this.boss.root.position.clone();
-    const from = this.bossMode === 'toBed' ? this.bossPos.clone() : this.bossHome.clone();
-    this.bossPos.copy(from);
-    this.bossPath = [
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 4.3),
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.4),
-      new THREE.Vector3(f.x + 3.3, 0, f.z + 0.65),
-      new THREE.Vector3(f.x + 2.2, 0.5, f.z + 0.88),
-    ];
+    this.bossPlan = [];
+    this.bossStep = null;
+    this.bossPath = this.bossRoute([sp.deskWay, sp.desk]);
     this.bossMode = 'toDesk';
-    this.bossPhase = '';
-    resetPose(this.boss.parts);
-    this.boss.roll.rotation.set(0, 0, 0);
-    this.boss.tip.rotation.set(0, 0, 0);
-    this.boss.tip.position.set(0, 0, 0);
     this.bossHud.show({ mode: 'waiting', icon: '🧐', title: '결재 서류 확인하러 가는 중', since: Date.now() });
   }
 
-  /** The approval came back: stamp it (or not), then go back to the bed. */
+  /** The approval came back: stamp it (or not), then carry on with the day. */
   bossVerdict(approved: boolean): void {
     if (!this.boss || this.bossMode === 'play' || this.bossMode === 'toBed') return;
-    if (this.bossMode === 'toDesk') { this.bossPath = []; this.bossPos.set(zoneById('founder')!.x + 2.2, 0.5, zoneById('founder')!.z + 0.88); }
+    if (this.bossMode === 'toDesk') { this.bossPath = []; this.bossPos.copy(this.bossSpots().desk); }
     this.bossMode = 'stamp';
     this.bossUntil = performance.now() + 2800;
     this.ensureStamp();
@@ -2154,22 +2319,20 @@ export class Office3D {
       : { mode: 'oops', icon: '❌', title: '반려합니다', since: Date.now() });
   }
 
-  /** The turn ended without a verdict: just go back to bed. */
+  /** The turn ended without a verdict: back to the day. */
   bossDismiss(): void {
     if (!this.boss || this.bossMode === 'play' || this.bossMode === 'toBed') return;
     this.bossBackToBed();
   }
 
+  /** Done with the paperwork: back to free roaming (a nap is likely after work). */
   private bossBackToBed(): void {
-    const f = zoneById('founder')!;
-    this.bossPath = [
-      new THREE.Vector3(f.x + 3.3, 0, f.z + 0.65),
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.4),
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 4.3),
-      this.bossHome!.clone(),
-    ];
-    this.bossMode = 'toBed';
-    this.bossHud.show({ mode: 'sleep', icon: '😽', title: '다시 놀러 가요', since: Date.now(), ttl: 2500 });
+    this.bossMode = 'play';
+    this.bossPath = [];
+    this.bossPlan = [];
+    this.bossStep = null;
+    this.bossLastAct = 'desk';
+    this.bossHud.show({ mode: 'sleep', icon: '😽', title: '결재 끝! 다시 놀러 가요', since: Date.now(), ttl: 2500 });
   }
 
   /** A paper on the founder's desk, a rubber stamp, and the seal it leaves. */
@@ -2195,33 +2358,19 @@ export class Office3D {
   private updateBoss(dt: number, now: number, el: HTMLCanvasElement): boolean {
     if (!this.boss) return false;
     const b = this.boss;
+    if (!this.bossHome) { this.bossHome = b.root.position.clone(); this.bossPos.copy(this.bossHome); }
     let moving = false;
-    if (this.bossMode !== 'play') {
-      this.bossHome ??= b.root.position.clone();
-      if (this.bossPath.length) {
-        const target = this.bossPath[0];
-        const dx = target.x - this.bossPos.x, dz = target.z - this.bossPos.z, dy = target.y - this.bossPos.y;
-        const dist = Math.hypot(dx, dz) || 1e-6;
-        const len = 2.2 * dt;
-        if (dist <= len) { this.bossPos.copy(target); this.bossPath.shift(); }
-        else { this.bossPos.x += (dx / dist) * len; this.bossPos.z += (dz / dist) * len; this.bossPos.y += dy * Math.min(1, len / dist); }
-        b.root.rotation.y = Math.atan2(dx, dz);
-        b.roll.position.y = Math.abs(Math.sin(now / 95)) * 0.05;
-        b.tip.rotation.y = 0;
-        moving = true;
-      } else if (this.bossMode === 'toDesk') {
+    if (this.bossMode === 'play' || this.bossMode === 'toBed') {
+      moving = this.bossFree(dt, now);
+    } else {
+      moving = this.bossWalk(dt, now);
+      if (!moving && this.bossMode === 'toDesk') {
         this.bossMode = 'review';
         b.root.rotation.y = 0;
         this.bossHud.show({ mode: 'waiting', icon: '🧐', title: '결재 검토 중', sub: '사장님 승인을 기다려요', since: Date.now() });
-      } else if (this.bossMode === 'toBed') {
-        this.bossMode = 'play';
-        b.root.position.copy(this.bossHome!);
-        b.root.rotation.y = 0;
-        this.bossHud.show(null);
-        return true;
       }
       if (this.bossMode === 'review') {
-        b.roll.position.y = 0;
+        this.bossPose('sit', 0, now);
         b.tip.rotation.y = Math.sin(now / 700) * 0.15;       // reading, head tilting
         b.tail.rotation.z = Math.sin(now / 260) * 0.6;
       }
@@ -2232,14 +2381,15 @@ export class Office3D {
         const slam = t < 1200 ? Math.abs(Math.sin((t / 1200) * Math.PI * 2)) : 1;
         this.stamp.tool.position.y = 0.03 + slam * 0.22;
         if (t > 300 && this.stamp.seal.userData.approved) this.stamp.seal.visible = true;
+        this.bossPose('sit', 0, now);
         b.roll.position.y = t < 1200 ? (1 - slam) * 0.04 : 0;
         if (left <= 0) {
           this.stamp.root.visible = false;
           this.bossBackToBed();
         }
       }
-      b.root.position.copy(this.bossPos);
     }
+    b.root.position.copy(this.bossPos);
     this.bossHud.update();
     if (this.bossHud.visible) {
       this.tmp.copy(b.root.position); this.tmp.y += 0.95; this.tmp.project(this.camera);
@@ -2515,7 +2665,6 @@ export class Office3D {
     }
 
     // boss cat's day on the bed: nap → stretch → groom → 꾹꾹이 → 뒹굴뒹굴 → 식빵
-    if (this.boss && this.bossMode === 'play') this.bossIdle(now);
     if (moved || this.wasMoving) this.renderer.shadowMap.needsUpdate = true;
     this.wasMoving = moved;
 
