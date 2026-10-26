@@ -5,7 +5,7 @@
 
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
-import type { ActivityEvent, CrewMember, RoomId, SessionInfo } from './types.js';
+import type { ActivityEvent, Approval, CrewMember, RoomId, SessionInfo } from './types.js';
 import { sanitize } from './parser.js';
 import { messagesPath } from './sessions.js';
 import { parseAny, pendingSubagents } from './claude.js';
@@ -25,7 +25,13 @@ const SUBAGENT_ROOM: Record<string, RoomId> = { Explore: 'archive', Plan: 'meeti
 
 const FINISHED = new Set(['completed', 'aborted', 'failed', 'cancelled', 'canceled', 'skipped']);
 
-interface Peek { mtime: number; room: RoomId | null; state: Pick<CrewMember, 'mode' | 'detail' | 'tool' | 'since'> }
+interface Peek {
+  mtime: number;
+  room: RoomId | null;
+  state: Pick<CrewMember, 'mode' | 'detail' | 'tool' | 'since'>;
+  /** the latest tool call, if nothing came after it and it has no result yet */
+  openCall?: { detail?: string; since: number };
+}
 const peekCache = new Map<string, Peek>();
 
 /** Latest room + bubble state of a session, from the tail of its log (cached by mtime). */
@@ -74,7 +80,13 @@ async function peekSession(root: string, info: SessionInfo): Promise<Peek | null
     if (ev.kind === 'pending_interaction') { state = { mode: 'waiting', detail: ev.question, since: ev.ts }; break; }
     if (ev.kind === 'turn_end') { state = { mode: 'done', since: ev.ts }; break; }
   }
-  const peek = { mtime: info.lastActivity, room, state };
+  // a trailing tool call that never got its result (Claude: maybe a permission prompt)
+  const results = new Set(events.filter((e) => e.kind === 'tool_result' && e.callId).map((e) => e.callId));
+  const lastWork = [...events].reverse().find((e) => e.kind !== 'tool_result' && e.kind !== 'other');
+  const openCall = lastWork?.kind === 'tool_call' && lastWork.callId && !results.has(lastWork.callId)
+    ? { detail: lastWork.detail ?? lastWork.tool, since: lastWork.ts }
+    : undefined;
+  const peek = { mtime: info.lastActivity, room, state, openCall };
   peekCache.set(path, peek);
   return peek;
 }
@@ -178,4 +190,35 @@ export async function computeCrew(root: string, sessions: SessionInfo[], activeS
     members.push({ id: s.sessionId, kind: 'session', source: s.source, name: s.name, status: 'working', room: peek?.room ?? null, ...(peek?.state ?? { since: s.lastActivity }) });
   }
   return members;
+}
+
+// ---- approvals ---------------------------------------------------------------
+/** Guess a Claude permission prompt once a call has sat without a result this long. */
+const INFER_AFTER_MS = 15_000;
+/** …but only for sessions that were active recently (an abandoned call isn't a prompt). */
+const INFER_WINDOW_MS = 10 * 60_000;
+const APPROVAL_WINDOW_MS = 6 * 3600_000;
+
+/** Everyone waiting on the user: the main agent, its workflow sub-agents, other sessions. */
+export async function computeApprovals(root: string, sessions: SessionInfo[], activeSessionId: string | null): Promise<Approval[]> {
+  const out: Approval[] = [];
+  const now = Date.now();
+  for (const s of sessions) {
+    if (now - s.lastActivity > APPROVAL_WINDOW_MS) break; // newest first
+    const kind: Approval['kind'] = s.sessionId === activeSessionId ? 'main' : s.parentId ? 'workflow' : 'session';
+    if (kind === 'workflow' && s.parentId !== activeSessionId) continue; // other sessions' sub-agents
+    const peek = await peekSession(root, s);
+    if (!peek) continue;
+    const base = { id: s.sessionId, who: kind === 'workflow' ? (s.role ?? 'agent') : s.name, kind, source: s.source ?? 'kiro' } as const;
+    if (peek.state.mode === 'waiting') {
+      out.push({ ...base, question: peek.state.detail || '승인이 필요해요', since: peek.state.since });
+    } else if (
+      s.source === 'claude' && peek.openCall
+      && now - peek.openCall.since > INFER_AFTER_MS
+      && now - s.lastActivity > INFER_AFTER_MS && now - s.lastActivity < INFER_WINDOW_MS
+    ) {
+      out.push({ ...base, question: `${peek.openCall.detail ?? '도구 실행'} — 허용을 기다리는 중일 수 있어요`, since: peek.openCall.since, inferred: true });
+    }
+  }
+  return out;
 }

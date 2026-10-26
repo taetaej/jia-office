@@ -10,7 +10,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import chokidar from 'chokidar';
-import type { ActivityEvent, ClientFrame, CrewMember, ServerFrame, SessionInfo } from './types.js';
+import type { ActivityEvent, Approval, ClientFrame, CrewMember, ServerFrame, SessionInfo } from './types.js';
 import {
   discoverSessions,
   messagesPath,
@@ -21,7 +21,7 @@ import { parseAny } from './claude.js';
 import { RingBuffer } from './ringBuffer.js';
 import { RoomState } from './roomState.js';
 import { scanWorkflows } from './workflows.js';
-import { computeCrew } from './crew.js';
+import { computeApprovals, computeCrew } from './crew.js';
 
 const WS_PORT = clampPort(process.env.KO_WS_PORT, 8787);
 const CATCHUP_EVENTS = 400;
@@ -52,6 +52,8 @@ const callTags = new Map<string, NonNullable<ActivityEvent['tag']>>();
 const CREW_MS = 1500;
 let crew: CrewMember[] = [];
 let crewJson = '[]';
+let approvals: Approval[] = [];
+let approvalsJson = '[]';
 let lastCrewAt = 0;
 
 const clients = new Set<WebSocket>();
@@ -178,6 +180,12 @@ async function poll(): Promise<void> {
       crewJson = json;
       broadcast({ v: 1, type: 'crew', members: crew });
     }
+    approvals = await computeApprovals(root, sessions, activeSessionId);
+    const aJson = JSON.stringify(approvals);
+    if (aJson !== approvalsJson) {
+      approvalsJson = aJson;
+      broadcast({ v: 1, type: 'approvals', items: approvals });
+    }
   }
 
   // Notify clients if the session list / live marker changed.
@@ -194,6 +202,7 @@ function startServer(): void {
     clients.add(ws);
     send(ws, catchupFrame());
     send(ws, { v: 1, type: 'crew', members: crew });
+    send(ws, { v: 1, type: 'approvals', items: approvals });
 
     ws.on('message', async (raw) => {
       let frame: ClientFrame;

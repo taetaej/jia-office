@@ -62,6 +62,7 @@ body {
 #app.guide-collapsed #floor-guide .panel-sub,
 #app.guide-collapsed #floor-guide h2,
 #app.guide-collapsed #floor-guide .follow-toggle,
+#app.guide-collapsed #floor-guide .alert-settings,
 #app.guide-collapsed #floor-guide .floor-list { display: none; }
 #app.guide-collapsed #floor-guide .panel-head { padding: 14px 8px 10px; justify-content: center; }
 
@@ -490,3 +491,7 @@ body {
 
 /* Claude Code cats: an orange status dot on the name tag */
 .cat-hud.src-claude .cat-tag::before { background: hsl(15 70% 55%); }
+
+/* approval alert toggles under 자동 따라가기 */
+.alert-settings { display: flex; flex-direction: column; padding-bottom: 6px; border-bottom: 1px solid hsl(var(--border) / 0.7); margin-bottom: 4px; }
+.alert-settings .follow-toggle { padding-top: 2px; padding-bottom: 2px; font-size: 11px; color: hsl(var(--muted)); }

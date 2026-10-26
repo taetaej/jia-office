@@ -29,6 +29,16 @@ export interface CrewMember {
   tool?: string;
   since: number;
 }
+/** Someone waiting on the user to approve something (see watcher types). */
+export interface Approval {
+  id: string;
+  who: string;
+  kind: 'main' | 'workflow' | 'session';
+  source: 'kiro' | 'claude';
+  question: string;
+  since: number;
+  inferred?: boolean;
+}
 export interface SessionInfo {
   sessionId: string;
   shortId: string;
@@ -43,6 +53,7 @@ export type ServerFrame =
   | { v: 1; type: 'event'; event: ActivityEvent; currentRoom: string }
   | { v: 1; type: 'sessions'; sessions: SessionInfo[]; liveSessionId: string | null }
   | { v: 1; type: 'crew'; members: CrewMember[] }
+  | { v: 1; type: 'approvals'; items: Approval[] }
   | { v: 1; type: 'ping'; t: number };
 
 export interface SocketHandlers {
@@ -50,6 +61,7 @@ export interface SocketHandlers {
   onEvent: (f: Extract<ServerFrame, { type: 'event' }>) => void;
   onSessions: (f: Extract<ServerFrame, { type: 'sessions' }>) => void;
   onCrew: (f: Extract<ServerFrame, { type: 'crew' }>) => void;
+  onApprovals: (f: Extract<ServerFrame, { type: 'approvals' }>) => void;
   onStatus: (connected: boolean) => void;
 }
 
@@ -91,6 +103,7 @@ export class OfficeSocket {
         case 'event': this.handlers.onEvent(frame); break;
         case 'sessions': this.handlers.onSessions(frame); break;
         case 'crew': this.handlers.onCrew(frame); break;
+        case 'approvals': this.handlers.onApprovals(frame); break;
         case 'ping': this.send({ v: 1, type: 'pong', t: frame.t }); break;
       }
     };

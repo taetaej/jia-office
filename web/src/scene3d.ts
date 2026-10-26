@@ -1284,6 +1284,7 @@ export class Office3D {
   private setupInput(canvas: HTMLCanvasElement): void {
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+      this.markManual();
       const factor = Math.exp(-e.deltaY * 0.001);
       this.zoomTarget = THREE.MathUtils.clamp(this.zoomTarget * factor, CAMERA.zoomMin, CAMERA.zoomMax);
     }, { passive: false });
@@ -1292,6 +1293,7 @@ export class Office3D {
     window.addEventListener('pointerup', () => { dragging = false; });
     window.addEventListener('pointermove', (e) => {
       if (!dragging) return;
+      this.markManual();
       const unit = (this.camera.right - this.camera.left) / canvas.clientWidth;
       this.pan.x -= (e.clientX - lx) * unit;
       this.pan.y += (e.clientY - ly) * unit;
@@ -1309,6 +1311,61 @@ export class Office3D {
       if (hits.length) for (const [id, m] of this.zoneSlabs) if (m === hits[0].object) this.hoverZone = id;
     });
     canvas.addEventListener('pointerleave', () => { this.hoverZone = null; });
+    // double-click: back to the overview, and let the camera follow again
+    canvas.addEventListener('dblclick', () => {
+      this.manualUntil = 0;
+      this.zoomTarget = 1;
+      this.pan.set(0, 0);
+      this.updateFrustum();
+    });
+  }
+
+  // ---- camera follow ------------------------------------------------------------
+  private followEnabled = true;
+  private focusActive = false;
+  /** after a manual pan/zoom the camera leaves the user alone for a while */
+  private manualUntil = 0;
+  private static readonly FOLLOW_ZOOM = 2.1;
+  private static readonly MANUAL_HOLD_MS = 10_000;
+
+  private markManual(): void {
+    this.manualUntil = performance.now() + Office3D.MANUAL_HOLD_MS;
+  }
+
+  /** "자동 따라가기": the camera may move on its own. */
+  setFollow(on: boolean): void {
+    this.followEnabled = on;
+    if (on) this.manualUntil = 0;
+  }
+
+  /** While the agent works the camera closes in on it; otherwise it eases back to the overview. */
+  setFocus(on: boolean): void {
+    this.focusActive = on;
+  }
+
+  private updateFollow(dt: number, now: number): void {
+    if (this.lookAt && now > this.lookAt.until) this.lookAt = null;
+    const looking = this.lookAt != null;
+    if (!looking && (!this.followEnabled || now < this.manualUntil)) return;
+    if (dt <= 0) return;
+    let tx = 0, ty = 0, tz = 1;
+    // a notification click: look at that cat; otherwise follow the working agent
+    const crewCat = this.lookAt?.id ? this.crew.get(this.lookAt.id) : undefined;
+    const target = looking ? (crewCat ? crewCat.root.position : this.charPos) : this.focusActive ? this.charPos : null;
+    if (target) {
+      // aim a little above the cat so its bubble stays in frame
+      this.tmp.set(target.x, 0.8, target.z).applyMatrix4(this.camera.matrixWorldInverse);
+      tx = this.tmp.x - this.fitCenter.x;
+      ty = this.tmp.y - this.fitCenter.y;
+      tz = Office3D.FOLLOW_ZOOM;
+    }
+    const dx = tx - this.pan.x, dy = ty - this.pan.y, dz = tz - this.zoomTarget;
+    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-3) return;
+    const k = 1 - Math.exp(-dt * 2.2); // smooth, frame-rate independent
+    this.pan.x += dx * k;
+    this.pan.y += dy * k;
+    this.zoomTarget += dz * k;
+    this.updateFrustum();
   }
 
   // ---- character: chibi tri-color cat ----------------------------------------------
@@ -2068,6 +2125,43 @@ export class Office3D {
     this.agentHud.setEmphasis(true);
   }
 
+  /** 비서냥 keeps the whole office's approval queue: who is waiting, and for how many. */
+  setApprovals(items: Array<{ who: string; question: string; inferred?: boolean }>): void {
+    if (!this.secretary) return;
+    if (!items.length) {
+      if (this.secretaryPending > 0) { this.secretaryPending = 1; this.secretaryResolve(); }
+      return;
+    }
+    const n = items.length;
+    const allGuesses = items.every((a) => a.inferred);
+    this.secretaryPending = n;
+    if (this.secretaryMode !== 'alert') { this.secretaryEscalated = false; this.secretaryEscalateAt = Date.now() + 20_000; }
+    this.secretaryMode = 'alert';
+    const title = allGuesses
+      ? (n > 1 ? `🕵️ ${n}건, 허용 기다리는 것 같아요` : `🕵️ ${items[0].who} 허용 기다리는 것 같아요`)
+      : (n > 1 ? `🔔 결재 ${n}건 대기 중이에요!` : `🔔 ${items[0].who} 결재 기다려요!`);
+    const sub = n > 1 ? items.map((a) => a.who).join(', ') : items[0].question;
+    this.secretaryHud.show({ mode: 'waiting', icon: allGuesses ? '🕵️' : '🔔', title, sub, since: Date.now() });
+    this.secretaryHud.setEscalated(false);
+    this.agentHud.setEmphasis(true);
+  }
+
+  /** Point the camera at whoever is waiting (the main agent or a crew cat) for a few seconds. */
+  focusOn(id: string, isMain: boolean): void {
+    this.lookAt = { id: isMain ? null : id, until: performance.now() + 8000 };
+    this.manualUntil = 0;
+  }
+  private lookAt: { id: string | null; until: number } | null = null;
+
+  /** A new request came in: 비서냥 announces it (unless an approval alert is up). */
+  secretaryAnnounce(request: string): void {
+    if (!this.secretary || this.secretaryPending > 0) return;
+    this.secretaryMode = 'relax';
+    this.secretaryUntil = performance.now() + 6000;
+    this.secretaryHud.show({ mode: 'say', icon: '📩', title: '새 요청이 왔어요!', sub: request || undefined, since: Date.now() });
+    this.secretaryHud.setEscalated(false);
+  }
+
   /** Public API: called from main.ts when interaction_resolved fires. */
   secretaryResolve(): void {
     if (!this.secretary) return;
@@ -2200,6 +2294,7 @@ export class Office3D {
   render(now: number): void {
     const dt = Math.max(0, Math.min(0.05, this.lastNow ? (now - this.lastNow) / 1000 : 0));
     this.lastNow = now;
+    this.updateFollow(dt, now);
     if (Math.abs(this.zoomTarget - this.zoom) > 0.001) {
       this.zoom += (this.zoomTarget - this.zoom) * 0.15;
       this.updateFrustum();

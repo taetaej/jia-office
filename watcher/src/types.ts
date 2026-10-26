@@ -95,6 +95,20 @@ export interface SessionInfo {
   workflow?: string;
 }
 
+/** Someone in the office is waiting for the user to approve something. */
+export interface Approval {
+  /** the waiting session's id */
+  id: string;
+  /** who is waiting: the session title, or the workflow step name */
+  who: string;
+  kind: 'main' | 'workflow' | 'session';
+  source: 'kiro' | 'claude';
+  question: string;
+  since: number;
+  /** Claude Code: guessed from a tool call with no result yet (permission prompts aren't logged) */
+  inferred?: boolean;
+}
+
 /** Server -> client frames. */
 export type ServerFrame =
   | {
@@ -109,6 +123,7 @@ export type ServerFrame =
   | { v: 1; type: 'event'; event: ActivityEvent; currentRoom: RoomId }
   | { v: 1; type: 'sessions'; sessions: SessionInfo[]; liveSessionId: string | null }
   | { v: 1; type: 'crew'; members: CrewMember[] }
+  | { v: 1; type: 'approvals'; items: Approval[] }
   | { v: 1; type: 'ping'; t: number };
 
 /** Client -> server frames. */

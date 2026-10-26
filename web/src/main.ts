@@ -4,8 +4,9 @@
 
 import { ROOMS, ROOM_ORDER, resolveRoom, type RoomId } from './rooms.js';
 import { Office3D, type BubbleInfo } from './scene3d.js';
-import { OfficeSocket, type ActivityEvent, type SessionInfo } from './socket.js';
+import { OfficeSocket, type ActivityEvent, type Approval, type SessionInfo } from './socket.js';
 import { ActivityLog, CATEGORY, type Category, type LogFilter } from './activityLog.js';
+import { ApprovalAlerts, loadAlertSettings, saveAlertSettings } from './alerts.js';
 
 const canvas = document.getElementById('office') as HTMLCanvasElement;
 const roomLabels = document.getElementById('room-labels')!;
@@ -106,6 +107,8 @@ function renderStats(): void {
   // Green only when the LIVE session is actively working/thinking/waiting.
   const live = watchingLive() && currentStatus !== 'idle';
   statusEls.dot.classList.toggle('live', live);
+  // the camera closes in on the agent while it works, and backs off when it rests
+  office.setFocus(live && !resting);
 }
 
 // ---- legend -----------------------------------------------------------------
@@ -270,7 +273,7 @@ function applyBubble(ev: ActivityEvent): void {
   if (kind !== undefined) currentStatus = kind;
 }
 
-/** Live-only reactions: confetti, sweat, LED flashes, and the boss cat's approvals. */
+/** Live-only reactions: confetti, sweat, LED flashes, the boss cat's approvals, 비서냥. */
 function react(ev: ActivityEvent): void {
   if (ev.kind === 'tool_result') {
     if (ev.tag === 'test') {
@@ -289,6 +292,41 @@ function react(ev: ActivityEvent): void {
   if (ev.kind === 'pending_interaction') office.bossReview();
   if (ev.kind === 'interaction_resolved') office.bossVerdict(ev.detail === 'approved');
   if (ev.kind === 'turn_end') office.bossDismiss();
+  // 비서냥 announces every new request (approvals come from the watcher's queue)
+  if (ev.kind === 'user' && watchingLive()) office.secretaryAnnounce(ev.detail ?? '');
+}
+
+// ---- approvals: 비서냥 + desktop notification / title / chime ----------------------
+const alertSettings = loadAlertSettings();
+const alerts = new ApprovalAlerts(alertSettings, (a) => office.focusOn(a.id, a.kind === 'main'));
+let lastApprovals: Approval[] = [];
+function applyApprovals(): void {
+  const items = lastApprovals.filter((a) => alertSettings.inferred || !a.inferred);
+  office.setApprovals(items);
+  alerts.update(items);
+}
+// dev only: feed a fake approval queue from the console to try the alerts
+if (import.meta.env.DEV) {
+  (window as unknown as { __approvals?: (items: Approval[]) => void }).__approvals = (items) => { lastApprovals = items; applyApprovals(); };
+}
+function wireAlertToggles(): void {
+  const desktop = document.getElementById('notify-desktop') as HTMLInputElement;
+  const sound = document.getElementById('notify-sound') as HTMLInputElement;
+  const inferred = document.getElementById('notify-inferred') as HTMLInputElement;
+  const canNotify = 'Notification' in window && Notification.permission !== 'denied';
+  desktop.checked = alertSettings.desktop && canNotify;
+  sound.checked = alertSettings.sound;
+  inferred.checked = alertSettings.inferred;
+  desktop.addEventListener('change', async () => {
+    if (desktop.checked) desktop.checked = await alerts.enableDesktop();
+    if (!desktop.checked && 'Notification' in window && Notification.permission === 'denied') {
+      desktop.title = '브라우저에서 이 사이트의 알림이 차단돼 있어요';
+    }
+    alertSettings.desktop = desktop.checked;
+    saveAlertSettings(alertSettings);
+  });
+  sound.addEventListener('change', () => { alertSettings.sound = sound.checked; saveAlertSettings(alertSettings); });
+  inferred.addEventListener('change', () => { alertSettings.inferred = inferred.checked; saveAlertSettings(alertSettings); applyApprovals(); });
 }
 
 // ---- socket -----------------------------------------------------------------
@@ -339,6 +377,10 @@ const socket = new OfficeSocket({
   },
   onCrew: (f) => {
     office.setCrew(f.members);
+  },
+  onApprovals: (f) => {
+    lastApprovals = f.items;
+    applyApprovals();
   },
   onSessions: (f) => {
     sessions = f.sessions;
@@ -413,6 +455,10 @@ try {
   }
 } catch { /* noop */ }
 wireControls();
+wireAlertToggles();
+// 자동 따라가기 also drives the camera
+office.setFollow(autoFollow.checked);
+autoFollow.addEventListener('change', () => office.setFollow(autoFollow.checked));
 
 buildLegend();
 socket.connect();
