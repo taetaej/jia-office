@@ -13,7 +13,7 @@ export const KIT_SCALE = 1.95;
 
 /** Kenney kit folder → uniform scale (furniture desk height 0.384 → 0.75m;
     food donut 0.25 → 0.1m; holiday present 0.45 → 0.36m). */
-export const KIT_BASE = { furniture: KIT_SCALE, food: 0.4, holiday: 0.8, platformer: 1.1 } as const;
+export const KIT_BASE = { furniture: KIT_SCALE, food: 0.4, holiday: 0.8, platformer: 1.1, market: 1.5 } as const;
 export type Kit = keyof typeof KIT_BASE;
 
 export const FLOOR = {
@@ -171,6 +171,20 @@ export const ASSET: Record<string, AssetDef> = {
   candyCane: { file: 'candy-cane-red', kit: 'holiday' },
   nutcracker: { file: 'nutcracker', kit: 'holiday', mul: 1.25 },
   stringLights: { file: 'lights-colored', kit: 'holiday', mul: 2, glow: 0.7 },
+  // pantry / café corner
+  cabinetUpper: { file: 'kitchenCabinetUpper', tint: { wood: PALETTE.white, woodDark: PALETTE.mint } },
+  microwave: { file: 'kitchenMicrowave', tint: { metalMedium: PALETTE.white } },
+  toaster: { file: 'toaster', tint: { metalMedium: PALETTE.pink } },
+  blender: { file: 'kitchenBlender', tint: { metalMedium: PALETTE.butter } },
+  kitchenBar: { file: 'kitchenBar', tint: { wood: PALETTE.white, woodDark: PALETTE.lightWood } },
+  kitchenBarEnd: { file: 'kitchenBarEnd', tint: { wood: PALETTE.white } },
+  stoolBar: { file: 'stoolBar' },
+  displayFruit: { file: 'display-fruit', kit: 'market' },
+  waffle: { file: 'waffle', kit: 'food' },
+  cupCoffee: { file: 'cup-coffee', kit: 'food' },
+  croissant: { file: 'croissant', kit: 'food' },
+  muffin: { file: 'muffin', kit: 'food' },
+  sodaBottle: { file: 'soda-bottle', kit: 'food' },
 };
 
 /** Procedural pieces the builder makes itself (no glb in the kits). */
@@ -178,7 +192,8 @@ export type ProcAsset =
   | 'serverRack' | 'coolingUnit' | 'cableTrayTop' | 'globe' | 'kanbanBoard'
   | 'reception' | 'podium' | 'car' | 'stanchions' | 'easelScreen' | 'deviceStand'
   | 'trophy' | 'catBed' | 'mug' | 'arcade' | 'beanBag' | 'lavaLamp' | 'xmasTree'
-  | 'catTree' | 'bossCat';
+  | 'catTree' | 'bossCat'
+  | 'vending' | 'menuBoard' | 'mugShelf' | 'coffeeSteam' | 'toastPop' | 'microwaveGlow';
 
 // ---- placements -------------------------------------------------------------
 /** Facing = the direction the object's FRONT points (for a chair/person: where
@@ -412,25 +427,56 @@ export const ZONES: ZoneDef[] = [
     ],
   },
   {
+    // 탕비실 → a little café: a full counter run on the west wall (under the
+    // window), upper cabinets + a mug shelf, a snack corner with a vending
+    // machine, a bar with stools facing the lobby, and a chalk menu board.
     id: 'pantry', x: 0, z: 14.5, w: 5, d: 5.5, floor: '#f3f1ec', enclosure: 'open',
     pattern: { kind: 'checker', a: '#fdf1f4', b: '#f7c9d7', size: 0.5 },
     furniture: [
+      // counter run along the west wall
       { asset: 'kitchenFridge', rx: 0.3, rz: 0.75, face: 'E' },
       { asset: 'kitchenCabinet', rx: 0.44, rz: 1.62, face: 'E' },
       { asset: 'kitchenSink', rx: 0.44, rz: 2.46, face: 'E' },
       { asset: 'kitchenCabinet', rx: 0.44, rz: 3.3, face: 'E' },
+      { asset: 'kitchenCabinet', rx: 0.44, rz: 4.14, face: 'E' },
       { asset: 'kitchenCoffeeMachine', rx: 0.4, rz: 1.62, face: 'E', on: 'kitchenCabinet' },
-      { asset: 'cake', rx: 0.45, rz: 3.3, on: 'kitchenCabinet' },
+      { asset: 'coffeeSteam', rx: 0.42, rz: 1.62, y: 1.25 },
+      { asset: 'cupCoffee', rx: 0.62, rz: 1.86, face: 'E', on: 'kitchenCabinet' },
+      { asset: 'microwave', rx: 0.36, rz: 3.3, face: 'E', on: 'kitchenCabinet' },
+      { asset: 'microwaveGlow', rx: 0.36, rz: 3.3, face: 'E', y: 0.88 },
+      { asset: 'toaster', rx: 0.42, rz: 3.98, face: 'E', on: 'kitchenCabinet' },
+      { asset: 'toastPop', rx: 0.42, rz: 3.98, face: 'E', y: 0.88 },
+      { asset: 'blender', rx: 0.36, rz: 4.38, face: 'E', on: 'kitchenCabinet' },
       { asset: 'radio', rx: 0.3, rz: 2.2, face: 'E', y: 0.96 },
-      { asset: 'tableRound', rx: 3.0, rz: 3.4 },
-      { asset: 'chair', rx: 2.1, rz: 3.4, face: 'E', tint: { wood: PALETTE.mint } },
-      { asset: 'chair', rx: 3.9, rz: 3.4, face: 'W', tint: { wood: PALETTE.butter } },
-      { asset: 'chair', rx: 3.0, rz: 4.45, face: 'N', tint: { wood: PALETTE.pink } },
-      { asset: 'donut', rx: 2.85, rz: 3.3, on: 'tableRound' },
-      { asset: 'donutChoc', rx: 3.05, rz: 3.55, on: 'tableRound' },
-      { asset: 'iceCream', rx: 3.25, rz: 3.25, on: 'tableRound' },
-      { asset: 'pottedPlantPink', rx: 4.55, rz: 0.45 },
-      { asset: 'trashcan', rx: 0.35, rz: 4.4 },
+      // wall storage above the counter (the window stays clear)
+      { asset: 'cabinetUpper', rx: 0.22, rz: 4.14, face: 'E', y: 1.45 },
+      { asset: 'mugShelf', rx: 0.05, rz: 1.45, face: 'E', y: 1.5 },
+      // snack corner against the server-room glass
+      { asset: 'pottedPlantPink', rx: 1.85, rz: 0.4 },
+      { asset: 'displayFruit', rx: 3.0, rz: 0.55, face: 'S' },
+      { asset: 'vending', rx: 4.4, rz: 0.45, face: 'S' },
+      // café table
+      { asset: 'rugRound', rx: 2.6, rz: 3.0, mul: 1.3, tint: { carpet: '#fdf3d8', carpetDarker: PALETTE.butter } },
+      { asset: 'tableRound', rx: 2.6, rz: 3.0 },
+      { asset: 'chair', rx: 1.65, rz: 3.0, face: 'E', tint: { wood: PALETTE.mint } },
+      { asset: 'chair', rx: 2.6, rz: 1.95, face: 'S', tint: { wood: PALETTE.butter } },
+      { asset: 'chair', rx: 2.6, rz: 4.05, face: 'N', tint: { wood: PALETTE.pink } },
+      { asset: 'waffle', rx: 2.45, rz: 2.9, on: 'tableRound' },
+      { asset: 'croissant', rx: 2.75, rz: 3.15, on: 'tableRound' },
+      { asset: 'cupCoffee', rx: 2.8, rz: 2.8, face: 'W', on: 'tableRound' },
+      { asset: 'donut', rx: 2.4, rz: 3.2, on: 'tableRound' },
+      // bar facing the lobby; today's finished turns stack up here as cupcakes
+      { asset: 'kitchenBar', rx: 4.55, rz: 2.75, face: 'W' },
+      { asset: 'kitchenBar', rx: 4.55, rz: 3.59, face: 'W' },
+      { asset: 'kitchenBarEnd', rx: 4.55, rz: 4.1, face: 'W' },
+      { asset: 'stoolBar', rx: 4.0, rz: 2.75, face: 'E', tint: { carpet: PALETTE.pink } },
+      { asset: 'stoolBar', rx: 4.0, rz: 3.59, face: 'E', tint: { carpet: PALETTE.mint } },
+      { asset: 'muffin', rx: 4.6, rz: 2.45, on: 'kitchenBar' },
+      { asset: 'sodaBottle', rx: 4.6, rz: 3.9, on: 'kitchenBar' },
+      // front: chalk menu board + bin
+      { asset: 'menuBoard', rx: 3.9, rz: 5.0, face: 'S' },
+      { asset: 'trashcan', rx: 0.35, rz: 5.15 },
+      { asset: 'plantSmall3', rx: 1.2, rz: 5.3 },
     ],
   },
   {

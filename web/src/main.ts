@@ -275,6 +275,17 @@ function applyBubble(ev: ActivityEvent): void {
   if (kind !== undefined) currentStatus = kind;
 }
 
+/** Turns finished today (per day, in this browser): the café bar's cupcake count. */
+const todayKey = (): string => `ko.done.${new Date().toLocaleDateString('sv-SE')}`;
+function dailyDone(): number {
+  try { return Number(localStorage.getItem(todayKey())) || 0; } catch { return 0; }
+}
+function bumpDailyDone(): number {
+  const n = dailyDone() + 1;
+  try { localStorage.setItem(todayKey(), String(n)); } catch { /* noop */ }
+  return n;
+}
+
 /** Live-only reactions: confetti, sweat, LED flashes, the boss cat's approvals, 비서냥. */
 function react(ev: ActivityEvent): void {
   if (ev.kind === 'tool_result') {
@@ -296,6 +307,8 @@ function react(ev: ActivityEvent): void {
   if (ev.kind === 'turn_end') office.bossDismiss();
   // 비서냥 announces every new request (approvals come from the watcher's queue)
   if (ev.kind === 'user' && watchingLive()) office.secretaryAnnounce(ev.detail ?? '');
+  // every finished turn puts a cupcake on the café bar
+  if (ev.kind === 'turn_end' && watchingLive()) office.setDailyDone(bumpDailyDone());
 }
 
 // ---- approvals: 비서냥 + desktop notification / title / chime ----------------------
@@ -458,6 +471,7 @@ try {
 } catch { /* noop */ }
 wireControls();
 wireAlertToggles();
+office.setDailyDone(dailyDone());
 // 자동 따라가기 also drives the camera
 office.setFollow(autoFollow.checked);
 autoFollow.addEventListener('change', () => office.setFollow(autoFollow.checked));

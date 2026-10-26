@@ -74,6 +74,7 @@ const PROC_HEIGHT: Record<string, number> = {
   serverRack: 2.0, coolingUnit: 1.2, reception: 1.05, podium: 0.1, car: 1.4, globe: 1.0,
   easelScreen: 1.8, deviceStand: 0.2, trophy: 1.1, catBed: 0.14, mug: 0.1,
   arcade: 1.75, beanBag: 0.55, lavaLamp: 0.32, xmasTree: 2.3, catTree: 1.45, bossCat: 0.6,
+  vending: 1.85, menuBoard: 1.0, mugShelf: 0.2, coffeeSteam: 0, toastPop: 0, microwaveGlow: 0,
 };
 
 const CALICO: CatColors = { body: '#f3efe9', patchA: '#d98a4e', patchB: '#2a2622', muzzle: '#f3efe9', eye: '#2f4a38' };
@@ -508,6 +509,52 @@ export class Office3D {
       else { placed.group.position.set(0.05, y, at); placed.group.rotation.y = Math.PI / 2; }
       this.scene.add(placed.group);
     }
+  }
+
+  // ---- pantry café: little animations + today's cupcakes ----------------------------
+  private pantryFx: { steam: THREE.Mesh[]; toast: THREE.Group[]; microwave: THREE.MeshStandardMaterial | null } = { steam: [], toast: [], microwave: null };
+  private cupcakes: THREE.Group[] = [];
+  private cupcakeTarget = 0;
+
+  private updatePantryFx(now: number): void {
+    const t = now / 1000;
+    for (const puff of this.pantryFx.steam) {
+      const p = (t / 2.4 + (puff.userData.phase as number)) % 1;
+      puff.position.set(Math.sin(t * 2 + p * 9) * 0.03, p * 0.45, Math.cos(t * 1.7 + p * 7) * 0.02);
+      puff.scale.setScalar(0.6 + p * 1.4);
+      (puff.material as THREE.MeshStandardMaterial).opacity = 0.45 * (1 - p);
+    }
+    // toast pops up for ~2s every 14s
+    const cycle = t % 14;
+    const up = cycle < 0.25 ? cycle / 0.25 : cycle < 2.2 ? 1 : cycle < 2.5 ? 1 - (cycle - 2.2) / 0.3 : 0;
+    for (const slice of this.pantryFx.toast) slice.position.y = 0.13 + up * 0.11;
+    // the microwave runs for 5s every 25s
+    if (this.pantryFx.microwave) this.pantryFx.microwave.emissiveIntensity = t % 25 < 5 ? 0.9 + Math.sin(t * 6) * 0.1 : 0;
+  }
+
+  /** Today's finished turns, shown as cupcakes lined up on the café bar (max 8). */
+  setDailyDone(n: number): void {
+    this.cupcakeTarget = Math.min(8, Math.max(0, n));
+    void this.syncCupcakes();
+  }
+
+  private cupcakeBusy = false;
+  private async syncCupcakes(): Promise<void> {
+    if (this.cupcakeBusy) return;
+    this.cupcakeBusy = true;
+    const p = zoneById('pantry');
+    const def = ASSET.cupcake;
+    while (p && def && this.cupcakes.length < this.cupcakeTarget) {
+      const placed = await this.models.place(assetUrl(def), assetScale(def));
+      if (!placed) break;
+      const i = this.cupcakes.length;
+      placed.group.position.set(p.x + 4.6 + (i % 2) * 0.12 - 0.06, 0.82, p.z + 2.6 + Math.floor(i / 2) * 0.32);
+      this.scene.add(placed.group);
+      this.cupcakes.push(placed.group);
+    }
+    while (this.cupcakes.length > this.cupcakeTarget) this.scene.remove(this.cupcakes.pop()!);
+    this.cupcakeBusy = false;
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   // ---- elevator --------------------------------------------------------------------
@@ -1113,6 +1160,96 @@ export class Office3D {
         passive = true;
         break;
       }
+      case 'vending': {
+        // a snack vending machine: lit glass front with rows of colorful treats
+        block(g, 0.85, 1.85, 0.7, PALETTE.sky, 0, 0, 0, 0.05);
+        block(g, 0.87, 0.2, 0.72, PALETTE.white, 0, 1.62, 0, 0.04);
+        const sign = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.hotPink), emissive: new THREE.Color(PALETTE.hotPink), emissiveIntensity: 0.6 });
+        g.add(mesh(new THREE.BoxGeometry(0.6, 0.1, 0.01), sign, -0.04, 1.72, 0.365, false));
+        const glass = new THREE.MeshStandardMaterial({ color: new THREE.Color('#eaf6ff'), emissive: new THREE.Color('#dff1ff'), emissiveIntensity: 0.35, roughness: 0.1 });
+        g.add(mesh(new THREE.BoxGeometry(0.56, 1.1, 0.02), glass, -0.1, 0.95, 0.355, false));
+        const treats = [PALETTE.hotPink, PALETTE.butter, PALETTE.mint, PALETTE.accent, PALETTE.lilac, '#e64a5f'];
+        for (let row = 0; row < 4; row++) {
+          block(g, 0.52, 0.015, 0.05, PALETTE.metal, -0.1, 0.48 + row * 0.27, 0.33);
+          for (let k = 0; k < 4; k++) block(g, 0.08, 0.13, 0.04, treats[(row + k) % treats.length], -0.3 + k * 0.13, 0.5 + row * 0.27, 0.34, 0.01);
+        }
+        block(g, 0.14, 0.4, 0.02, PALETTE.white, 0.3, 0.95, 0.355);                       // keypad panel
+        for (let k = 0; k < 6; k++) block(g, 0.03, 0.03, 0.01, PALETTE.metalDark, 0.27 + (k % 2) * 0.06, 1.15 - Math.floor(k / 2) * 0.06, 0.368);
+        block(g, 0.5, 0.14, 0.03, PALETTE.screen, -0.1, 0.2, 0.355);                      // pick-up slot
+        fp = [0.85, 0.7];
+        break;
+      }
+      case 'menuBoard': {
+        // A-frame chalkboard: today's menu, chalk-written
+        const c = document.createElement('canvas');
+        c.width = 256; c.height = 320;
+        const ctx = c.getContext('2d')!;
+        ctx.fillStyle = '#2f4a3e'; ctx.fillRect(0, 0, 256, 320);
+        ctx.fillStyle = '#f7f3e8'; ctx.textAlign = 'center';
+        ctx.font = '700 30px "Paperlogy", sans-serif'; ctx.fillText("TODAY'S", 128, 52); ctx.fillText('MENU', 128, 88);
+        ctx.font = '500 24px "Paperlogy", sans-serif';
+        [['☕ 아메리카노', '#f7f3e8'], ['🧁 컵케이크', '#f4a6c0'], ['🍩 도넛', '#f6d365'], ['🧇 와플', '#9edfc4']].forEach(([t, col], i) => { ctx.fillStyle = col; ctx.fillText(t, 128, 145 + i * 42); });
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const face = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+        const wood = mat(PALETTE.lightWood, 0.8);
+        for (const sz of [1, -1]) {
+          const board = new THREE.Group();
+          board.add(mesh(new THREE.BoxGeometry(0.62, 0.86, 0.03), wood, 0, 0, 0));
+          board.add(mesh(new THREE.PlaneGeometry(0.54, 0.76), face, 0, 0, 0.017 * sz, false));
+          if (sz < 0) board.children[1].rotation.y = Math.PI;
+          board.position.set(0, 0.46, 0.13 * sz);
+          board.rotation.x = -0.28 * sz;
+          g.add(board);
+        }
+        fp = [0.62, 0.4];
+        break;
+      }
+      case 'mugShelf': {
+        // a little wall shelf with a row of mugs (local −z is the wall)
+        block(g, 0.75, 0.03, 0.17, PALETTE.lightWood, 0, 0, 0.085);
+        for (const sx of [-0.27, 0.27]) block(g, 0.03, 0.08, 0.12, PALETTE.lightWood, sx, -0.08, 0.06);
+        [PALETTE.hotPink, PALETTE.butter, PALETTE.mint, PALETTE.sky, PALETTE.white].forEach((col, i) => {
+          g.add(mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.08, 14), mat(col, 0.5), -0.28 + i * 0.14, 0.07, 0.09));
+          g.add(mesh(new THREE.TorusGeometry(0.022, 0.007, 6, 10), mat(col, 0.5), -0.28 + i * 0.14 + 0.04, 0.07, 0.09));
+        });
+        passive = true;
+        break;
+      }
+      case 'coffeeSteam': {
+        // wisps of steam rising from the coffee machine (animated in updatePantryFx)
+        const steam = new THREE.MeshStandardMaterial({ color: '#ffffff', transparent: true, opacity: 0.5, roughness: 1, depthWrite: false });
+        for (let k = 0; k < 5; k++) {
+          const puff = mesh(new THREE.SphereGeometry(0.035, 8, 6), steam.clone(), 0, 0, 0, false);
+          puff.userData.phase = k / 5;
+          g.add(puff);
+          this.pantryFx.steam.push(puff);
+        }
+        passive = true;
+        break;
+      }
+      case 'toastPop': {
+        // two slices of bread in the toaster; they pop up every so often
+        const bread = mat('#e9c58f', 0.9), crust = mat('#b9874d', 0.9);
+        for (const ox of [-0.04, 0.04]) {
+          const slice = new THREE.Group();
+          slice.add(mesh(new THREE.BoxGeometry(0.02, 0.12, 0.11), crust, 0, 0.06, 0, false));
+          slice.add(mesh(new THREE.BoxGeometry(0.022, 0.1, 0.09), bread, 0, 0.06, 0, false));
+          slice.position.set(ox, 0.13, 0);
+          g.add(slice);
+          this.pantryFx.toast.push(slice);
+        }
+        passive = true;
+        break;
+      }
+      case 'microwaveGlow': {
+        // the microwave's window lights up warm while it "runs"
+        const glow = new THREE.MeshStandardMaterial({ color: '#3a3326', emissive: new THREE.Color('#ffcf7a'), emissiveIntensity: 0, roughness: 0.4 });
+        g.add(mesh(new THREE.PlaneGeometry(0.3, 0.2), glow, -0.08, 0.18, 0.232, false));
+        this.pantryFx.microwave = glow;
+        passive = true;
+        break;
+      }
       case 'mug': {
         g.add(mesh(new THREE.CylinderGeometry(0.045, 0.04, 0.1, 16), mat('#ffffff', 0.5), 0, 0.05, 0));
         const handle = mesh(new THREE.TorusGeometry(0.03, 0.008, 6, 12), mat('#ffffff', 0.5), 0.05, 0.05, 0);
@@ -1465,6 +1602,7 @@ export class Office3D {
     const target = zoneForRoom(resolved);
     if (!target?.route) return;
     this.onBed = false;
+    this.coffeeUntil = 0;
     this.activeRoom = (resolved === 'founder' ? 'po' : resolved) as RoomId;
     this.highlightZone(target.id);
     this.path = this.routeTo(target.route.map(([x, z]) => new THREE.Vector3(x, 0, z)));
@@ -1480,14 +1618,46 @@ export class Office3D {
 
   /** Nothing to do: the agent goes for a nap on the lobby sofa (true), or wakes up (false). */
   setIdle(rest: boolean): void {
-    if (!rest) { this.onBed = false; return; }
+    if (!rest) { this.onBed = false; this.coffeeUntil = 0; return; }
     const lobby = zoneForRoom('lobby')!;
     const sofa = this.restSpot.clone().setY(0);
     const inLobby = this.zoneAt(this.charPos)?.id === lobby.id;
-    this.path = inLobby ? [sofa] : this.routeTo([...lobby.route!.slice(0, -1).map(([x, z]) => new THREE.Vector3(x, 0, z)), sofa]);
+    const toLobby = inLobby ? [] : this.routeTo(lobby.route!.slice(0, -1).map(([x, z]) => new THREE.Vector3(x, 0, z)));
+    // most breaks start with a coffee from the pantry machine, then the sofa
+    if (Math.random() < 0.7) {
+      const pantry = zoneById('pantry')!;
+      this.coffeeSpot.set(pantry.x + 1.3, 0, pantry.z + 1.62);
+      this.path = [...toLobby, ...Office3D.PANTRY_WAY.map(([x, z]) => new THREE.Vector3(x, 0, z)), this.coffeeSpot.clone()];
+      this.coffeeUntil = -1; // armed: starts when the cat reaches the machine
+    } else {
+      this.path = [...toLobby, sofa];
+      this.coffeeUntil = 0;
+    }
     this.onBed = true;
     this.activeRoom = 'lobby';
     this.highlightZone(lobby.id);
+  }
+
+  /** lobby → pantry walkway (around the tree, presents and the car podium) */
+  private static readonly PANTRY_WAY: Array<[number, number]> = [[11, 13], [8, 15.2], [5.4, 15.6]];
+  private coffeeSpot = new THREE.Vector3();
+  /** -1 = on the way to the machine; >0 = sipping until this time; 0 = no coffee break */
+  private coffeeUntil = 0;
+
+  /** Coffee break: wait at the machine with a ☕ bubble, then go nap on the sofa. */
+  private updateCoffeeBreak(now: number): void {
+    if (!this.onBed || this.coffeeUntil === 0 || this.path.length) return;
+    if (this.coffeeUntil === -1) {
+      this.coffeeUntil = now + 4000;
+      this.character.rotation.y = -Math.PI / 2; // face the machine
+      this.agentHud.show({ mode: 'say', icon: '☕', title: '커피 한 잔…', since: Date.now(), ttl: 4000 });
+      return;
+    }
+    if (now < this.coffeeUntil) return;
+    this.coffeeUntil = 0;
+    const back = [...Office3D.PANTRY_WAY].reverse().map(([x, z]) => new THREE.Vector3(x, 0, z));
+    this.path = [...back, this.restSpot.clone().setY(0)];
+    this.agentHud.show({ mode: 'sleep', icon: '💤', title: '쉬는 중… zZ', since: Date.now() });
   }
 
   private highlightZone(id: string): void {
@@ -2262,6 +2432,7 @@ export class Office3D {
     const secMoving = this.updateSecretary(dt, now, el);
     this.updateReactions(dt, now);
     this.updateElevator(dt, now);
+    this.updatePantryFx(now);
     if (crewMoving || bossMoving || secMoving) this.renderer.shadowMap.needsUpdate = true;
   }
 
@@ -2327,7 +2498,8 @@ export class Office3D {
       if (dist > 0.01) this.character.rotation.y = Math.atan2(this.tmp.x, this.tmp.z);
       moved = true;
     }
-    const resting = this.onBed && this.path.length === 0;
+    this.updateCoffeeBreak(now);
+    const resting = this.onBed && this.path.length === 0 && this.coffeeUntil === 0;
     this.character.position.set(this.charPos.x, resting ? this.restSpot.y : 0, this.charPos.z);
     resetPose(this.agentParts);
     if (resting) {
