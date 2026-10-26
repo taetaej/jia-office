@@ -10,6 +10,7 @@ import { type RoomId, resolveRoom } from './rooms.js';
 import { ModelLoader } from './models.js';
 import { CrewCat, Hud, blink, closeEyes, coatFor, greetPose, resetPose, sleepPose, type BubbleInfo, type CatColors, type CatParts, type Seat } from './crew.js';
 import type { CrewMember, Source } from './socket.js';
+import { BRAND_LIVERY } from './brand.js';
 export type { BubbleInfo } from './crew.js';
 import {
   ASSET, CAMERA, CORRIDOR2_X, CORRIDOR_Z, FLOOR, GLASS, KIT_SCALE, LIGHTING, MATERIAL_DEFAULTS,
@@ -980,12 +981,12 @@ export class Office3D {
         const w = p.w ?? 5.2, d = p.d ?? 2.8;
         block(g, w, 0.1, d, '#eceef1', 0, 0, 0, 0.05);
         block(g, w - 0.3, 0.012, d - 0.3, '#f7f8fa', 0, 0.1, 0, 0.005);
-        // a big sun disc under the car: red ring, yellow sun (Red Bull–style colours, no logo)
-        const ring = mesh(new THREE.CircleGeometry(1.25, 48), mat('#d61f2c', 0.8), 0, 0.114, 0, false);
+        // a turntable disc under the car in the office palette: powder-blue ring, white inner disc
+        const ring = mesh(new THREE.CircleGeometry(1.25, 48), mat(PALETTE.sky, 0.8), 0, 0.114, 0, false);
         ring.rotation.x = -Math.PI / 2;
-        const sunDisc = mesh(new THREE.CircleGeometry(1.0, 48), mat('#ffc72c', 0.8), 0, 0.116, 0, false);
-        sunDisc.rotation.x = -Math.PI / 2;
-        g.add(ring, sunDisc);
+        const inner = mesh(new THREE.CircleGeometry(1.0, 48), mat(PALETTE.white, 0.8), 0, 0.116, 0, false);
+        inner.rotation.x = -Math.PI / 2;
+        g.add(ring, inner);
         passive = true; // the car is the visible footprint
         break;
       }
@@ -1276,11 +1277,11 @@ export class Office3D {
     return { footprint: fp, passive };
   }
 
-  /** The showroom car: a low-poly F1 machine in a Red Bull–style livery (matte
-      navy, red stripes, yellow nose tip and airbox; no logos). Built from
+  /** The showroom car: a low-poly F1 machine in the office palette (charcoal
+      body, powder-blue stripes, burnt-orange pops and a paw emblem). Built from
       primitives, length along local +z (the nose), ~4.8 m long. */
   private async buildCar(x: number, z: number, y: number, yaw: number, id: string, zone: string): Promise<void> {
-    const NAVY = '#1d2550', NAVY2 = '#283266', RED = '#d61f2c', YEL = '#ffc72c', CARBON = '#16181d', TIRE = '#202226';
+    const BODY = PALETTE.serverRack, BODY2 = PALETTE.metalDark, SKY = PALETTE.skyDeep, POP = PALETTE.accent, CARBON = '#16181d', TIRE = '#202226';
     const g = new THREE.Group();
     const part = (geo: THREE.BufferGeometry, color: string, px: number, py: number, pz: number, rough = 0.55, metal = 0.15) => {
       const m = mesh(geo, mat(color, rough, metal), px, py, pz);
@@ -1291,40 +1292,40 @@ export class Office3D {
     // floor + plank
     part(new THREE.BoxGeometry(1.45, 0.04, 3.7), CARBON, 0, 0.1, -0.15, 0.7, 0.2);
     // monocoque + cockpit
-    part(rbox(0.66, 0.42, 1.9, 0.12), NAVY, 0, 0.33, 0.05);
+    part(rbox(0.66, 0.42, 1.9, 0.12), BODY, 0, 0.33, 0.05);
     // nose cone: tapered, with a yellow tip
-    const nose = part(new THREE.CylinderGeometry(0.07, 0.24, 1.55, 16), NAVY, 0, 0.27, 1.75);
+    const nose = part(new THREE.CylinderGeometry(0.07, 0.24, 1.55, 16), BODY, 0, 0.27, 1.75);
     nose.rotation.x = Math.PI / 2;
     nose.scale.set(1.25, 1, 0.6);
-    const tip = part(new THREE.SphereGeometry(0.1, 14, 10), YEL, 0, 0.27, 2.52);
+    const tip = part(new THREE.SphereGeometry(0.1, 14, 10), POP, 0, 0.27, 2.52);
     tip.scale.set(1.3, 0.6, 1);
-    part(new THREE.BoxGeometry(0.3, 0.012, 0.9), RED, 0, 0.385, 1.55); // red stripe along the nose
+    part(new THREE.BoxGeometry(0.3, 0.012, 0.9), SKY, 0, 0.385, 1.55); // red stripe along the nose
     // sidepods with a red stripe on top (flat flanks carry the livery decals)
     for (const sx of [-1, 1]) {
-      part(rbox(0.52, 0.38, 1.6, 0.06), NAVY2, sx * 0.58, 0.31, -0.35);
-      part(new THREE.BoxGeometry(0.42, 0.012, 1.3), RED, sx * 0.6, 0.505, -0.4);
+      part(rbox(0.52, 0.38, 1.6, 0.06), BODY2, sx * 0.58, 0.31, -0.35);
+      part(new THREE.BoxGeometry(0.42, 0.012, 1.3), SKY, sx * 0.6, 0.505, -0.4);
     }
     // engine cover sweeping back to the rear wing, plus the shark fin
-    part(rbox(0.5, 0.42, 1.5, 0.08), NAVY, 0, 0.4, -1.15);
-    part(new THREE.BoxGeometry(0.03, 0.34, 1.1), NAVY2, 0, 0.75, -1.35);
-    part(new THREE.BoxGeometry(0.035, 0.05, 1.1), RED, 0, 0.93, -1.35);
+    part(rbox(0.5, 0.42, 1.5, 0.08), BODY, 0, 0.4, -1.15);
+    part(new THREE.BoxGeometry(0.03, 0.34, 1.1), BODY2, 0, 0.75, -1.35);
+    part(new THREE.BoxGeometry(0.035, 0.05, 1.1), SKY, 0, 0.93, -1.35);
     // roll hoop / airbox in yellow, driver helmet, halo
-    part(rbox(0.24, 0.3, 0.32, 0.08), YEL, 0, 0.68, -0.5);
-    part(new THREE.SphereGeometry(0.14, 16, 12), NAVY2, 0, 0.62, -0.1).scale.set(1, 0.95, 1.05);
-    part(new THREE.BoxGeometry(0.2, 0.05, 0.02), YEL, 0, 0.64, 0.03); // visor stripe
+    part(rbox(0.24, 0.3, 0.32, 0.08), POP, 0, 0.68, -0.5);
+    part(new THREE.SphereGeometry(0.14, 16, 12), BODY2, 0, 0.62, -0.1).scale.set(1, 0.95, 1.05);
+    part(new THREE.BoxGeometry(0.2, 0.05, 0.02), POP, 0, 0.64, 0.03); // visor stripe
     const halo = part(new THREE.TorusGeometry(0.3, 0.03, 8, 20, Math.PI), CARBON, 0, 0.58, 0.05, 0.5, 0.3);
     halo.rotation.x = -Math.PI / 2;
     part(new THREE.BoxGeometry(0.05, 0.2, 0.05), CARBON, 0, 0.62, 0.36, 0.5, 0.3);
     // front wing: two carbon elements, red endplates
     part(new THREE.BoxGeometry(1.9, 0.035, 0.36), CARBON, 0, 0.11, 2.3, 0.6, 0.2);
-    part(new THREE.BoxGeometry(1.7, 0.03, 0.2), NAVY2, 0, 0.17, 2.2);
-    for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.03, 0.22, 0.42), RED, sx * 0.96, 0.19, 2.3);
+    part(new THREE.BoxGeometry(1.7, 0.03, 0.2), BODY2, 0, 0.17, 2.2);
+    for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.03, 0.22, 0.42), SKY, sx * 0.96, 0.19, 2.3);
     // rear wing: mainplane + flap, navy endplates with red tops, beam wing
     part(new THREE.BoxGeometry(1.05, 0.05, 0.3), CARBON, 0, 0.9, -2.15, 0.6, 0.2);
-    part(new THREE.BoxGeometry(1.05, 0.04, 0.18), RED, 0, 0.98, -2.05);
+    part(new THREE.BoxGeometry(1.05, 0.04, 0.18), SKY, 0, 0.98, -2.05);
     for (const sx of [-1, 1]) {
-      part(new THREE.BoxGeometry(0.03, 0.62, 0.5), NAVY, sx * 0.53, 0.68, -2.12);
-      part(new THREE.BoxGeometry(0.035, 0.08, 0.5), YEL, sx * 0.53, 1.0, -2.12);
+      part(new THREE.BoxGeometry(0.03, 0.62, 0.5), BODY, sx * 0.53, 0.68, -2.12);
+      part(new THREE.BoxGeometry(0.035, 0.08, 0.5), POP, sx * 0.53, 1.0, -2.12);
     }
     part(new THREE.BoxGeometry(0.9, 0.04, 0.2), CARBON, 0, 0.45, -2.15, 0.6, 0.2);
     part(new THREE.BoxGeometry(0.08, 0.5, 0.1), CARBON, 0, 0.68, -2.0, 0.6, 0.2); // wing pillar
@@ -1335,7 +1336,7 @@ export class Office3D {
       tyre.rotation.z = Math.PI / 2;
       wg.add(tyre);
       for (const side of [-1, 1]) {
-        const rim = mesh(new THREE.CylinderGeometry(r * 0.62, r * 0.62, 0.02, 24), mat(NAVY2, 0.4, 0.5), side * (w / 2 + 0.005), 0, 0);
+        const rim = mesh(new THREE.CylinderGeometry(r * 0.62, r * 0.62, 0.02, 24), mat(BODY2, 0.4, 0.5), side * (w / 2 + 0.005), 0, 0);
         rim.rotation.z = Math.PI / 2;
         wg.add(rim);
       }
@@ -1351,17 +1352,18 @@ export class Office3D {
       wheel(sx * 0.8, -1.55, 0.36, 0.42);
     }
     try { await document.fonts.load('italic 700 40px "Paperlogy"'); } catch { /* paint with the fallback face */ }
-    this.addCarLivery(g, { NAVY, RED, YEL });
+    this.addCarLivery(g, { BODY, SKY, POP });
     g.position.set(x, y + 0.1, z);
     g.rotation.y = yaw;
     this.scene.add(g);
     this.addFootprint(id, zone, 'car', x, z, 2.0, 4.9, 'E', 1.0, false);
   }
 
-  /** Painted-on livery for the F1 car: canvas-texture decals (our own team names
+  /** Painted-on livery for the F1 car: canvas-texture decals (the company name
       and number, halftone fades, chevrons, checkers, "MEOW" tyre lettering). */
-  private addCarLivery(g: THREE.Group, c: { NAVY: string; RED: string; YEL: string }): void {
+  private addCarLivery(g: THREE.Group, c: { BODY: string; SKY: string; POP: string }): void {
     const FONT = '"Paperlogy", "Arial Black", sans-serif';
+    const WHITE = PALETTE.white, BRAND = BRAND_LIVERY;
     const aniso = this.renderer.capabilities.getMaxAnisotropy();
     type Draw = (ctx: CanvasRenderingContext2D, W: number, H: number) => void;
     const decal = (w: number, h: number, draw: Draw, px: number, py: number, pz: number, ry = 0, rx = 0): void => {
@@ -1393,7 +1395,7 @@ export class Office3D {
       ctx.fillStyle = fill;
       ctx.fillText(s, x, y);
     };
-    /** Red halftone dots fading out from both ends toward the middle. */
+    /** Halftone dots fading out from both ends toward the middle. */
     const halftone = (ctx: CanvasRenderingContext2D, W: number, H: number, color: string): void => {
       const step = H / 7;
       ctx.fillStyle = color;
@@ -1412,28 +1414,37 @@ export class Office3D {
       const s = h / rows;
       for (let i = 0; i * s < w; i++) {
         for (let j = 0; j < rows; j++) {
-          ctx.fillStyle = (i + j) % 2 ? '#ffffff' : '#111318';
+          ctx.fillStyle = (i + j) % 2 ? WHITE : c.BODY;
           ctx.fillRect(x0 + i * s, y0 + j * s, Math.min(s, w - i * s), s);
         }
       }
     };
+    /** Orange roundel with a white paw print — the team emblem. */
+    const paw = (ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void => {
+      ctx.fillStyle = c.POP;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = WHITE;
+      ctx.beginPath(); ctx.ellipse(x, y + r * 0.22, r * 0.36, r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+      for (const [dx, dy] of [[-0.46, -0.12], [-0.17, -0.42], [0.17, -0.42], [0.46, -0.12]]) {
+        ctx.beginPath(); ctx.ellipse(x + dx * r, y + dy * r, r * 0.14, r * 0.18, dx * 0.6, 0, Math.PI * 2); ctx.fill();
+      }
+    };
 
-    // sidepod flanks: halftone fade, yellow sun, team name
+    // sidepod flanks: halftone fade, orange paw emblem, company name
     for (const sx of [-1, 1]) {
       decal(1.45, 0.25, (ctx, W, H) => {
-        halftone(ctx, W, H, c.RED);
-        ctx.fillStyle = c.RED;
+        halftone(ctx, W, H, c.SKY);
+        ctx.fillStyle = c.SKY;
         ctx.fillRect(0, H * 0.82, W, H * 0.1);
-        ctx.fillStyle = c.YEL;
-        ctx.beginPath(); ctx.arc(W * 0.5, H * 0.45, H * 0.36, 0, Math.PI * 2); ctx.fill();
-        text(ctx, "JIA'S OFFICE", W * 0.5, H * 0.43, H * 0.42, W * 0.62, '#ffffff', c.NAVY);
-        text(ctx, 'RACING · KIRO OFFICE', W * 0.5, H * 0.73, H * 0.13, W * 0.4, c.YEL);
+        paw(ctx, W * 0.2, H * 0.45, H * 0.34);
+        text(ctx, BRAND, W * 0.57, H * 0.4, H * 0.36, W * 0.5, WHITE, c.BODY);
+        text(ctx, 'RACING · KIRO × CLAUDE × CODEX', W * 0.57, H * 0.7, H * 0.12, W * 0.42, c.SKY);
       }, sx * 0.843, 0.31, -0.35, sx * Math.PI / 2);
     }
     // engine cover flanks (behind the sidepods): chevrons + the three teams
     for (const sx of [-1, 1]) {
       decal(0.72, 0.3, (ctx, W, H) => {
-        ctx.fillStyle = c.RED;
+        ctx.fillStyle = c.SKY;
         for (let i = 0; i < 4; i++) {
           const x = W * (0.06 + i * 0.07);
           ctx.beginPath();
@@ -1441,51 +1452,49 @@ export class Office3D {
           ctx.lineTo(x + W * 0.04, H * 0.8); ctx.lineTo(x, H * 0.8); ctx.lineTo(x + W * 0.05, H * 0.5);
           ctx.closePath(); ctx.fill();
         }
-        text(ctx, 'KIRO', W * 0.66, H * 0.4, H * 0.42, W * 0.5, '#ffffff');
-        text(ctx, 'CLAUDE × CODEX', W * 0.66, H * 0.72, H * 0.16, W * 0.5, c.YEL);
+        text(ctx, 'KIRO', W * 0.66, H * 0.4, H * 0.42, W * 0.5, WHITE);
+        text(ctx, 'CLAUDE × CODEX', W * 0.66, H * 0.72, H * 0.16, W * 0.5, c.POP);
       }, sx * 0.253, 0.42, -1.5, sx * Math.PI / 2);
     }
     // shark fin: car number with a checkered trailing edge
     for (const sx of [-1, 1]) {
       decal(1.0, 0.3, (ctx, W, H) => {
         checker(ctx, W * 0.72, H * 0.12, W * 0.26, H * 0.4, 3);
-        text(ctx, '01', W * 0.36, H * 0.48, H * 0.78, W * 0.5, '#ffffff', c.RED);
+        text(ctx, '01', W * 0.36, H * 0.48, H * 0.78, W * 0.5, WHITE, c.SKY);
       }, sx * 0.017, 0.76, -1.35, sx * Math.PI / 2);
     }
-    // number on the cockpit nose, plus a pinstriped "1" roundel
+    // paw emblem on the cockpit nose, ringed in powder blue
     decal(0.36, 0.36, (ctx, W, H) => {
-      ctx.translate(W, H); ctx.rotate(Math.PI); // read upright from the camera side
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(W / 2, H / 2, W * 0.46, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = c.RED; ctx.lineWidth = W * 0.05;
-      ctx.beginPath(); ctx.arc(W / 2, H / 2, W * 0.4, 0, Math.PI * 2); ctx.stroke();
-      text(ctx, '01', W / 2, H * 0.53, H * 0.5, W * 0.62, c.NAVY);
+      ctx.translate(W, H); ctx.rotate(Math.PI); // toes point forward, upright from the camera side
+      ctx.fillStyle = c.SKY;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, W * 0.48, 0, Math.PI * 2); ctx.fill();
+      paw(ctx, W / 2, H / 2, W * 0.42);
     }, 0, 0.546, 0.72, 0, -Math.PI / 2);
     // front wing: checker strip on the leading edge + lettering on the upper flap
     decal(1.86, 0.08, (ctx, W, H) => checker(ctx, 0, 0, W, H, 2), 0, 0.129, 2.43, 0, -Math.PI / 2);
     decal(1.66, 0.18, (ctx, W, H) => {
-      text(ctx, "JIA'S OFFICE  ·  F1 TEAM", W / 2, H / 2, H * 0.62, W * 0.9, '#ffffff');
+      text(ctx, `${BRAND}  ·  F1 TEAM`, W / 2, H / 2, H * 0.62, W * 0.9, WHITE);
     }, 0, 0.186, 2.2, 0, -Math.PI / 2);
-    // rear wing: name across the red flap, team names on the endplates
+    // rear wing: name across the blue flap, team names on the endplates
     decal(1.0, 0.16, (ctx, W, H) => {
-      text(ctx, "JIA'S OFFICE", W / 2, H / 2, H * 0.7, W * 0.92, '#ffffff', c.NAVY);
+      text(ctx, BRAND, W / 2, H / 2, H * 0.7, W * 0.92, WHITE, c.BODY);
     }, 0, 1.001, -2.05, 0, -Math.PI / 2);
     for (const sx of [-1, 1]) {
       decal(0.46, 0.5, (ctx, W, H) => {
-        ctx.fillStyle = c.RED;
+        ctx.fillStyle = c.SKY;
         ctx.fillRect(0, H * 0.06, W, H * 0.06);
-        text(ctx, sx > 0 ? 'CLAUDE' : 'CODEX', W / 2, H * 0.36, H * 0.2, W * 0.9, '#ffffff');
-        text(ctx, 'KIRO', W / 2, H * 0.64, H * 0.24, W * 0.8, c.YEL);
-        halftone(ctx, W, H * 0.12, c.RED);
+        text(ctx, sx > 0 ? 'CLAUDE' : 'CODEX', W / 2, H * 0.36, H * 0.2, W * 0.9, WHITE);
+        text(ctx, 'KIRO', W / 2, H * 0.64, H * 0.24, W * 0.8, c.POP);
+        halftone(ctx, W, H * 0.12, c.SKY);
       }, sx * 0.547, 0.66, -2.12, sx * Math.PI / 2);
     }
-    // tyre sidewalls: yellow ring with "MEOW" lettering around it (replaces plain band)
+    // tyre sidewalls: orange ring with "MEOW" lettering around it (replaces plain band)
     const ring: Draw = (ctx, W) => {
       const cx = W / 2;
-      ctx.strokeStyle = c.YEL;
+      ctx.strokeStyle = c.POP;
       ctx.lineWidth = W * 0.035;
       ctx.beginPath(); ctx.arc(cx, cx, W * 0.43, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = WHITE;
       ctx.font = `italic 700 ${W * 0.075}px ${FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const label = 'MEOW  ·  ';
