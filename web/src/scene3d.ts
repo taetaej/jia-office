@@ -7,7 +7,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { EffectComposer, RenderPass, EffectPass, SMAAEffect, SMAAPreset } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
 import { type RoomId, resolveRoom } from './rooms.js';
-import { ModelLoader, tintMeshes } from './models.js';
+import { ModelLoader } from './models.js';
 import { CrewCat, Hud, blink, closeEyes, coatFor, greetPose, resetPose, sleepPose, type BubbleInfo, type CatColors, type CatParts, type Seat } from './crew.js';
 import type { CrewMember, Source } from './socket.js';
 export type { BubbleInfo } from './crew.js';
@@ -19,7 +19,6 @@ import {
 
 const assetUrl = (def: AssetDef): string => `/assets/${def.kit ?? 'furniture'}/${def.file}.glb`;
 const assetScale = (def: AssetDef, mul?: number): number => KIT_BASE[def.kit ?? 'furniture'] * (mul ?? def.mul ?? 1);
-const V = (name: string): string => `/assets/vehicles/${name}.glb`;
 const DEG = Math.PI / 180;
 const FACE_YAW: Record<Dir, number> = { S: 0, E: 90 * DEG, N: 180 * DEG, W: 270 * DEG };
 
@@ -981,6 +980,12 @@ export class Office3D {
         const w = p.w ?? 5.2, d = p.d ?? 2.8;
         block(g, w, 0.1, d, '#eceef1', 0, 0, 0, 0.05);
         block(g, w - 0.3, 0.012, d - 0.3, '#f7f8fa', 0, 0.1, 0, 0.005);
+        // a big sun disc under the car: red ring, yellow sun (Red Bull–style colours, no logo)
+        const ring = mesh(new THREE.CircleGeometry(1.25, 48), mat('#d61f2c', 0.8), 0, 0.114, 0, false);
+        ring.rotation.x = -Math.PI / 2;
+        const sunDisc = mesh(new THREE.CircleGeometry(1.0, 48), mat('#ffc72c', 0.8), 0, 0.116, 0, false);
+        sunDisc.rotation.x = -Math.PI / 2;
+        g.add(ring, sunDisc);
         passive = true; // the car is the visible footprint
         break;
       }
@@ -1271,59 +1276,235 @@ export class Office3D {
     return { footprint: fp, passive };
   }
 
+  /** The showroom car: a low-poly F1 machine in a Red Bull–style livery (matte
+      navy, red stripes, yellow nose tip and airbox; no logos). Built from
+      primitives, length along local +z (the nose), ~4.8 m long. */
   private async buildCar(x: number, z: number, y: number, yaw: number, id: string, zone: string): Promise<void> {
-    // Sportier model + size by LENGTH so it reads as a low, long sports car on
-    // the showroom podium. hatchback-sports has the most sports-coupe silhouette
-    // of the Kenney set. Length is the model's longest horizontal axis.
-    const CAR = V('hatchback-sports');
-    const raw = await this.models.measure(CAR);
-    if (!raw) return;
-    const lenAxis = Math.max(raw.size.x, raw.size.z);
-    const s = 4.0 / lenAxis; // ~4.0 m long sports car
-    const placed = await this.models.place(CAR, s);
-    if (!placed) return;
-    placed.group.position.set(x, y + 0.1, z);
-    placed.group.rotation.y = yaw;
-    this.tintCarBody(placed.group);
-    this.scene.add(placed.group);
-    this.addFootprint(id, zone, 'car', x, z, placed.size.x, placed.size.z, 'E', placed.size.y, false);
+    const NAVY = '#1d2550', NAVY2 = '#283266', RED = '#d61f2c', YEL = '#ffc72c', CARBON = '#16181d', TIRE = '#202226';
+    const g = new THREE.Group();
+    const part = (geo: THREE.BufferGeometry, color: string, px: number, py: number, pz: number, rough = 0.55, metal = 0.15) => {
+      const m = mesh(geo, mat(color, rough, metal), px, py, pz);
+      g.add(m);
+      return m;
+    };
+    const rbox = (w: number, h: number, d: number, r = 0.05) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2, h / 2, d / 2));
+    // floor + plank
+    part(new THREE.BoxGeometry(1.45, 0.04, 3.7), CARBON, 0, 0.1, -0.15, 0.7, 0.2);
+    // monocoque + cockpit
+    part(rbox(0.66, 0.42, 1.9, 0.12), NAVY, 0, 0.33, 0.05);
+    // nose cone: tapered, with a yellow tip
+    const nose = part(new THREE.CylinderGeometry(0.07, 0.24, 1.55, 16), NAVY, 0, 0.27, 1.75);
+    nose.rotation.x = Math.PI / 2;
+    nose.scale.set(1.25, 1, 0.6);
+    const tip = part(new THREE.SphereGeometry(0.1, 14, 10), YEL, 0, 0.27, 2.52);
+    tip.scale.set(1.3, 0.6, 1);
+    part(new THREE.BoxGeometry(0.3, 0.012, 0.9), RED, 0, 0.385, 1.55); // red stripe along the nose
+    // sidepods with a red stripe on top (flat flanks carry the livery decals)
+    for (const sx of [-1, 1]) {
+      part(rbox(0.52, 0.38, 1.6, 0.06), NAVY2, sx * 0.58, 0.31, -0.35);
+      part(new THREE.BoxGeometry(0.42, 0.012, 1.3), RED, sx * 0.6, 0.505, -0.4);
+    }
+    // engine cover sweeping back to the rear wing, plus the shark fin
+    part(rbox(0.5, 0.42, 1.5, 0.08), NAVY, 0, 0.4, -1.15);
+    part(new THREE.BoxGeometry(0.03, 0.34, 1.1), NAVY2, 0, 0.75, -1.35);
+    part(new THREE.BoxGeometry(0.035, 0.05, 1.1), RED, 0, 0.93, -1.35);
+    // roll hoop / airbox in yellow, driver helmet, halo
+    part(rbox(0.24, 0.3, 0.32, 0.08), YEL, 0, 0.68, -0.5);
+    part(new THREE.SphereGeometry(0.14, 16, 12), NAVY2, 0, 0.62, -0.1).scale.set(1, 0.95, 1.05);
+    part(new THREE.BoxGeometry(0.2, 0.05, 0.02), YEL, 0, 0.64, 0.03); // visor stripe
+    const halo = part(new THREE.TorusGeometry(0.3, 0.03, 8, 20, Math.PI), CARBON, 0, 0.58, 0.05, 0.5, 0.3);
+    halo.rotation.x = -Math.PI / 2;
+    part(new THREE.BoxGeometry(0.05, 0.2, 0.05), CARBON, 0, 0.62, 0.36, 0.5, 0.3);
+    // front wing: two carbon elements, red endplates
+    part(new THREE.BoxGeometry(1.9, 0.035, 0.36), CARBON, 0, 0.11, 2.3, 0.6, 0.2);
+    part(new THREE.BoxGeometry(1.7, 0.03, 0.2), NAVY2, 0, 0.17, 2.2);
+    for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.03, 0.22, 0.42), RED, sx * 0.96, 0.19, 2.3);
+    // rear wing: mainplane + flap, navy endplates with red tops, beam wing
+    part(new THREE.BoxGeometry(1.05, 0.05, 0.3), CARBON, 0, 0.9, -2.15, 0.6, 0.2);
+    part(new THREE.BoxGeometry(1.05, 0.04, 0.18), RED, 0, 0.98, -2.05);
+    for (const sx of [-1, 1]) {
+      part(new THREE.BoxGeometry(0.03, 0.62, 0.5), NAVY, sx * 0.53, 0.68, -2.12);
+      part(new THREE.BoxGeometry(0.035, 0.08, 0.5), YEL, sx * 0.53, 1.0, -2.12);
+    }
+    part(new THREE.BoxGeometry(0.9, 0.04, 0.2), CARBON, 0, 0.45, -2.15, 0.6, 0.2);
+    part(new THREE.BoxGeometry(0.08, 0.5, 0.1), CARBON, 0, 0.68, -2.0, 0.6, 0.2); // wing pillar
+    // wheels: wide black tyres, navy rims (sidewall lettering is a livery decal); plus suspension arms
+    const wheel = (wx: number, wz: number, r: number, w: number) => {
+      const wg = new THREE.Group();
+      const tyre = mesh(new THREE.CylinderGeometry(r, r, w, 28), mat(TIRE, 0.9), 0, 0, 0);
+      tyre.rotation.z = Math.PI / 2;
+      wg.add(tyre);
+      for (const side of [-1, 1]) {
+        const rim = mesh(new THREE.CylinderGeometry(r * 0.62, r * 0.62, 0.02, 24), mat(NAVY2, 0.4, 0.5), side * (w / 2 + 0.005), 0, 0);
+        rim.rotation.z = Math.PI / 2;
+        wg.add(rim);
+      }
+      wg.position.set(wx, r, wz);
+      g.add(wg);
+      for (const dy of [-0.05, 0.08]) {
+        const arm = part(new THREE.CylinderGeometry(0.012, 0.012, Math.abs(wx) - 0.3, 6), CARBON, wx / 2 + Math.sign(wx) * 0.15, r + dy, wz, 0.6, 0.3);
+        arm.rotation.z = Math.PI / 2;
+      }
+    };
+    for (const sx of [-1, 1]) {
+      wheel(sx * 0.82, 1.5, 0.33, 0.32);
+      wheel(sx * 0.8, -1.55, 0.36, 0.42);
+    }
+    try { await document.fonts.load('italic 700 40px "Paperlogy"'); } catch { /* paint with the fallback face */ }
+    this.addCarLivery(g, { NAVY, RED, YEL });
+    g.position.set(x, y + 0.1, z);
+    g.rotation.y = yaw;
+    this.scene.add(g);
+    this.addFootprint(id, zone, 'car', x, z, 2.0, 4.9, 'E', 1.0, false);
   }
 
-  /** Recolor ONLY the car's body to powder blue, keeping the Kenney colormap
-      texture (so wheels/windows/lights keep their detail). We multiply the body
-      material's color by the sky tint instead of flat-replacing it, and keep the
-      map — glass/wheels/lights/tiny meshes are skipped. */
-  private tintCarBody(car: THREE.Group): void {
-    const sky = new THREE.Color(PALETTE.sky);
-    const box3 = new THREE.Box3();
-    const size = new THREE.Vector3();
-    car.traverse((obj) => {
-      const m = obj as THREE.Mesh;
-      if (!m.isMesh) return;
-      const name = (m.name + ' ' + (Array.isArray(m.material) ? '' : (m.material?.name ?? ''))).toLowerCase();
-      if (/glass|window|light|wheel|tire|tyre/.test(name)) return;
-      // skip tiny meshes (trim, handles) so only the big body panels recolor
-      if (m.geometry) {
-        m.geometry.computeBoundingBox();
-        if (m.geometry.boundingBox) {
-          box3.copy(m.geometry.boundingBox); box3.getSize(size);
-          if (Math.max(size.x, size.y, size.z) < 0.3) return;
+  /** Painted-on livery for the F1 car: canvas-texture decals (our own team names
+      and number, halftone fades, chevrons, checkers, "MEOW" tyre lettering). */
+  private addCarLivery(g: THREE.Group, c: { NAVY: string; RED: string; YEL: string }): void {
+    const FONT = '"Paperlogy", "Arial Black", sans-serif';
+    const aniso = this.renderer.capabilities.getMaxAnisotropy();
+    type Draw = (ctx: CanvasRenderingContext2D, W: number, H: number) => void;
+    const decal = (w: number, h: number, draw: Draw, px: number, py: number, pz: number, ry = 0, rx = 0): void => {
+      const PPM = 700;
+      const cv = document.createElement('canvas');
+      cv.width = Math.min(2048, Math.round(w * PPM));
+      cv.height = Math.min(2048, Math.round(h * PPM));
+      const ctx = cv.getContext('2d')!;
+      draw(ctx, cv.width, cv.height);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = aniso;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({
+        map: tex, transparent: true, roughness: 0.5, metalness: 0.1, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      }));
+      m.position.set(px, py, pz);
+      m.rotation.set(rx, ry, 0, 'YXZ');
+      m.receiveShadow = true;
+      g.add(m);
+    };
+    /** Bold italic racing type, shrunk until it fits maxW. */
+    const text = (ctx: CanvasRenderingContext2D, s: string, x: number, y: number, size: number, maxW: number, fill: string, stroke?: string): void => {
+      let px = size;
+      do { ctx.font = `italic 700 ${px}px ${FONT}`; px *= 0.94; } while (ctx.measureText(s).width > maxW && px > 6);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (stroke) { ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.14; ctx.strokeStyle = stroke; ctx.strokeText(s, x, y); }
+      ctx.fillStyle = fill;
+      ctx.fillText(s, x, y);
+    };
+    /** Red halftone dots fading out from both ends toward the middle. */
+    const halftone = (ctx: CanvasRenderingContext2D, W: number, H: number, color: string): void => {
+      const step = H / 7;
+      ctx.fillStyle = color;
+      for (let x = step / 2; x < W; x += step) {
+        const edge = Math.min(x, W - x) / (W * 0.45);
+        const r = step * 0.48 * Math.max(0, 1 - edge);
+        if (r < 0.8) continue;
+        for (let y = step / 2; y < H; y += step) {
+          ctx.beginPath();
+          ctx.arc(x + ((y / step) % 2 > 1 ? step / 2 : 0), y, r, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
-      const mats = Array.isArray(m.material) ? m.material : [m.material];
-      const recolored = mats.map((src) => {
-        const c = (src as THREE.MeshStandardMaterial).clone();
-        // DROP the colormap on body panels and paint flat sky-blue. (Multiplying
-        // the sky tint over Kenney's colormap turned the car muddy green — the
-        // texture's base car color was tinting through. Removing the map gives a
-        // clean powder-blue body; wheels/glass/lights are skipped above so they
-        // keep their detail.)
-        if ('map' in c) { c.map = null; c.needsUpdate = true; }
-        if ('color' in c && c.color) c.color.copy(sky);
-        return c;
-      });
-      m.material = recolored.length === 1 ? recolored[0] : recolored;
-    });
+    };
+    const checker = (ctx: CanvasRenderingContext2D, x0: number, y0: number, w: number, h: number, rows: number): void => {
+      const s = h / rows;
+      for (let i = 0; i * s < w; i++) {
+        for (let j = 0; j < rows; j++) {
+          ctx.fillStyle = (i + j) % 2 ? '#ffffff' : '#111318';
+          ctx.fillRect(x0 + i * s, y0 + j * s, Math.min(s, w - i * s), s);
+        }
+      }
+    };
+
+    // sidepod flanks: halftone fade, yellow sun, team name
+    for (const sx of [-1, 1]) {
+      decal(1.45, 0.25, (ctx, W, H) => {
+        halftone(ctx, W, H, c.RED);
+        ctx.fillStyle = c.RED;
+        ctx.fillRect(0, H * 0.82, W, H * 0.1);
+        ctx.fillStyle = c.YEL;
+        ctx.beginPath(); ctx.arc(W * 0.5, H * 0.45, H * 0.36, 0, Math.PI * 2); ctx.fill();
+        text(ctx, "JIA'S OFFICE", W * 0.5, H * 0.43, H * 0.42, W * 0.62, '#ffffff', c.NAVY);
+        text(ctx, 'RACING · KIRO OFFICE', W * 0.5, H * 0.73, H * 0.13, W * 0.4, c.YEL);
+      }, sx * 0.843, 0.31, -0.35, sx * Math.PI / 2);
+    }
+    // engine cover flanks (behind the sidepods): chevrons + the three teams
+    for (const sx of [-1, 1]) {
+      decal(0.72, 0.3, (ctx, W, H) => {
+        ctx.fillStyle = c.RED;
+        for (let i = 0; i < 4; i++) {
+          const x = W * (0.06 + i * 0.07);
+          ctx.beginPath();
+          ctx.moveTo(x, H * 0.2); ctx.lineTo(x + W * 0.04, H * 0.2); ctx.lineTo(x + W * 0.09, H * 0.5);
+          ctx.lineTo(x + W * 0.04, H * 0.8); ctx.lineTo(x, H * 0.8); ctx.lineTo(x + W * 0.05, H * 0.5);
+          ctx.closePath(); ctx.fill();
+        }
+        text(ctx, 'KIRO', W * 0.66, H * 0.4, H * 0.42, W * 0.5, '#ffffff');
+        text(ctx, 'CLAUDE × CODEX', W * 0.66, H * 0.72, H * 0.16, W * 0.5, c.YEL);
+      }, sx * 0.253, 0.42, -1.5, sx * Math.PI / 2);
+    }
+    // shark fin: car number with a checkered trailing edge
+    for (const sx of [-1, 1]) {
+      decal(1.0, 0.3, (ctx, W, H) => {
+        checker(ctx, W * 0.72, H * 0.12, W * 0.26, H * 0.4, 3);
+        text(ctx, '01', W * 0.36, H * 0.48, H * 0.78, W * 0.5, '#ffffff', c.RED);
+      }, sx * 0.017, 0.76, -1.35, sx * Math.PI / 2);
+    }
+    // number on the cockpit nose, plus a pinstriped "1" roundel
+    decal(0.36, 0.36, (ctx, W, H) => {
+      ctx.translate(W, H); ctx.rotate(Math.PI); // read upright from the camera side
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, W * 0.46, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = c.RED; ctx.lineWidth = W * 0.05;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, W * 0.4, 0, Math.PI * 2); ctx.stroke();
+      text(ctx, '01', W / 2, H * 0.53, H * 0.5, W * 0.62, c.NAVY);
+    }, 0, 0.546, 0.72, 0, -Math.PI / 2);
+    // front wing: checker strip on the leading edge + lettering on the upper flap
+    decal(1.86, 0.08, (ctx, W, H) => checker(ctx, 0, 0, W, H, 2), 0, 0.129, 2.43, 0, -Math.PI / 2);
+    decal(1.66, 0.18, (ctx, W, H) => {
+      text(ctx, "JIA'S OFFICE  ·  F1 TEAM", W / 2, H / 2, H * 0.62, W * 0.9, '#ffffff');
+    }, 0, 0.186, 2.2, 0, -Math.PI / 2);
+    // rear wing: name across the red flap, team names on the endplates
+    decal(1.0, 0.16, (ctx, W, H) => {
+      text(ctx, "JIA'S OFFICE", W / 2, H / 2, H * 0.7, W * 0.92, '#ffffff', c.NAVY);
+    }, 0, 1.001, -2.05, 0, -Math.PI / 2);
+    for (const sx of [-1, 1]) {
+      decal(0.46, 0.5, (ctx, W, H) => {
+        ctx.fillStyle = c.RED;
+        ctx.fillRect(0, H * 0.06, W, H * 0.06);
+        text(ctx, sx > 0 ? 'CLAUDE' : 'CODEX', W / 2, H * 0.36, H * 0.2, W * 0.9, '#ffffff');
+        text(ctx, 'KIRO', W / 2, H * 0.64, H * 0.24, W * 0.8, c.YEL);
+        halftone(ctx, W, H * 0.12, c.RED);
+      }, sx * 0.547, 0.66, -2.12, sx * Math.PI / 2);
+    }
+    // tyre sidewalls: yellow ring with "MEOW" lettering around it (replaces plain band)
+    const ring: Draw = (ctx, W) => {
+      const cx = W / 2;
+      ctx.strokeStyle = c.YEL;
+      ctx.lineWidth = W * 0.035;
+      ctx.beginPath(); ctx.arc(cx, cx, W * 0.43, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `italic 700 ${W * 0.075}px ${FONT}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const label = 'MEOW  ·  ';
+      for (let k = 0; k < 2; k++) {
+        [...label].forEach((ch, i) => {
+          const a = k * Math.PI + (i / label.length) * Math.PI * 0.9 - Math.PI * 0.95;
+          ctx.save();
+          ctx.translate(cx + Math.cos(a) * W * 0.37, cx + Math.sin(a) * W * 0.37);
+          ctx.rotate(a + Math.PI / 2);
+          ctx.fillText(ch, 0, 0);
+          ctx.restore();
+        });
+      }
+    };
+    for (const sx of [-1, 1]) {
+      for (const [wx, wz, r, w] of [[0.82, 1.5, 0.33, 0.32], [0.8, -1.55, 0.36, 0.42]] as const) {
+        decal(r * 2, r * 2, ring, sx * (wx + w / 2 + 0.012), r, wz, sx * Math.PI / 2);
+      }
+    }
   }
 
   // ---- layout checks --------------------------------------------------------------
