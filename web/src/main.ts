@@ -36,8 +36,10 @@ function scheduleRest(ms: number): void {
   idleTimer = setTimeout(() => {
     if (!watchingLive()) return; // never nap while browsing a past session
     resting = true;
+    currentStatus = 'idle'; // napping on the lobby sofa → header reads 대기
     office.setIdle(true);
     office.showBubble({ mode: 'sleep', icon: '💤', title: '쉬는 중… zZ', since: Date.now() });
+    renderStats();
   }, ms);
 }
 function noteActivity(ev?: ActivityEvent): void {
@@ -58,38 +60,47 @@ let sessions: SessionInfo[] = [];
 let liveSessionId: string | null = null;
 let activeSessionId = '';
 
-// ---- running stats (현황) ----------------------------------------------------
-// Aggregated per active session; reset on catch-up when the session switches.
-const statEls = {
-  actions: document.getElementById('stat-actions')!,
-  edits: document.getElementById('stat-edits')!,
-  tests: document.getElementById('stat-tests')!,
-  commits: document.getElementById('stat-commits')!,
-  room: document.getElementById('stat-room')!,
+// ---- header status readout --------------------------------------------------
+// A single-line sentence of the CURRENT situation (room + what the agent is
+// doing + session name), replacing the old numeric count chips. The status
+// phrase reuses the SAME event signals that drive the speech bubble (bubbleFor /
+// thinkingSince / resting) so the header and the cat's bubble can never drift.
+const statusEls = {
+  dot: document.getElementById('status-dot')!,
+  text: document.getElementById('status-text')!,
+  session: document.getElementById('status-session')!,
 };
-const stats = { actions: 0, edits: 0, tests: 0, commits: 0 };
-const EDIT_TOOLS = new Set(['str_replace', 'fs_write', 'fs_append']);
-function resetStats(): void {
-  stats.actions = stats.edits = stats.tests = stats.commits = 0;
-  renderStats();
-}
-function tallyEvent(ev: ActivityEvent): void {
-  if (ev.kind === 'tool_call') {
-    stats.actions++;
-    if (ev.tool && EDIT_TOOLS.has(ev.tool)) stats.edits++;
-  }
-  if (ev.kind === 'tool_result') {
-    if (ev.tag === 'test') stats.tests++;
-    if (ev.tag === 'commit' && ev.ok) stats.commits++;
+type StatusKind = 'work' | 'idle' | 'wait' | 'think';
+let currentStatus: StatusKind = 'idle';
+const STATUS_PHRASE: Record<StatusKind, string> = {
+  work: '작업 중', idle: '대기', wait: '승인 대기', think: '고민 중',
+};
+/** Collapse the same `ev.kind` signals bubbleFor switches on into a header
+    status kind. Returns undefined to keep the current status (e.g. a bare
+    assistant line that only updates the bubble text, not the state). */
+function statusKindFor(ev: ActivityEvent): StatusKind | undefined {
+  switch (ev.kind) {
+    case 'assistant':
+      return ev.label === 'thinking' ? 'think' : undefined;
+    case 'tool_call':
+      return 'work';
+    case 'pending_interaction':
+      return 'wait';
+    case 'user':
+    case 'turn_end':
+      return 'idle';
+    default:
+      return undefined;
   }
 }
 function renderStats(): void {
-  statEls.actions.textContent = String(stats.actions);
-  statEls.edits.textContent = String(stats.edits);
-  statEls.tests.textContent = String(stats.tests);
-  statEls.commits.textContent = String(stats.commits);
-  const r = currentRoom in ROOMS ? ROOMS[currentRoom].label : '—';
-  statEls.room.textContent = r;
+  const roomLabel = currentRoom in ROOMS ? ROOMS[currentRoom].label : '—';
+  statusEls.text.textContent = `${roomLabel}에서 ${STATUS_PHRASE[currentStatus]}`;
+  const active = sessions.find((s) => s.sessionId === activeSessionId);
+  statusEls.session.textContent = active ? active.name : ''; // untrusted → textContent
+  // Green only when the LIVE session is actively working/thinking/waiting.
+  const live = watchingLive() && currentStatus !== 'idle';
+  statusEls.dot.classList.toggle('live', live);
 }
 
 // ---- legend -----------------------------------------------------------------
@@ -108,8 +119,15 @@ function buildLegend(): void {
     const sw = document.createElement('span');
     sw.className = 'legend-swatch';
     sw.style.background = LEGEND_SWATCH[id] ?? 'transparent';
-    const txt = document.createElement('span');
-    txt.textContent = `${r.label} · ${r.sub}`;
+    const txt = document.createElement('div');
+    txt.className = 'legend-text';
+    const name = document.createElement('span');
+    name.className = 'legend-name';
+    name.textContent = r.label;
+    const desc = document.createElement('span');
+    desc.className = 'legend-desc';
+    desc.textContent = r.desc ?? '';
+    txt.append(name, desc);
     cell.append(sw, txt);
     legendGrid.append(cell);
   }
@@ -244,6 +262,10 @@ function bubbleFor(ev: ActivityEvent): BubbleInfo | null | undefined {
 function applyBubble(ev: ActivityEvent): void {
   const next = bubbleFor(ev);
   if (next !== undefined) office.showBubble(next);
+  // Keep the header status in lockstep with the bubble: same event, same
+  // classifier family. undefined = leave the current status untouched.
+  const kind = statusKindFor(ev);
+  if (kind !== undefined) currentStatus = kind;
   // Also persist the bubble line into the activity log so thoughts/状態 don't
   // vanish — but skip events addActivity already logs verbatim (tool_call/user)
   // and collapse repeats (e.g. continuous "고민 중").
@@ -302,13 +324,13 @@ const socket = new OfficeSocket({
     liveSessionId = f.liveSessionId;
     activeSessionId = f.sessionId;
     activityList.textContent = '';
-    resetStats(); // new session (or reconnect) → recount from its catch-up
-    for (const ev of f.events) { addActivity(ev); tallyEvent(ev); }
+    for (const ev of f.events) { addActivity(ev); }
     const active = sessions.find((s) => s.sessionId === activeSessionId);
     sessionNameEl.textContent = active ? active.name : '세션';
     office.setAgentName(active ? `에이전트냥 · ${active.name}` : '에이전트냥');
     // restore the bubble from recent history (an old, finished session stays quiet)
     thinkingSince = 0;
+    currentStatus = 'idle'; // reset; the replay below re-derives it for the live session
     office.showBubble(null);
     // Replay recent bubbles only for the LIVE session. For a past session we're
     // just browsing, keep the cat neutral (no stale "완료 / 쉬는 중" bubble).
@@ -327,7 +349,6 @@ const socket = new OfficeSocket({
   onEvent: (f) => {
     noteActivity(f.event); // wakes a napping agent first
     addActivity(f.event);
-    tallyEvent(f.event);
     applyBubble(f.event);
     react(f.event);
     setRoom(f.currentRoom);

@@ -27,20 +27,21 @@ export interface RoomRect {
   id: RoomId;
   label: string; // KO
   sub: string;   // EN
+  desc?: string; // KO one-line purpose (legend rooms only; layout-only rooms omit)
 }
 
 /** Legend/display metadata. Keyed by the ids the ROOM GUIDE shows. corridor and
     founder are layout-only, so they are NOT part of the legend set, but are kept
     resolvable for `room in ROOMS` guards. */
 export const ROOMS: Record<RoomId, RoomRect> = {
-  archive:  { id: 'archive',  label: '아카이브', sub: 'ARCHIVE' },
-  dev:      { id: 'dev',      label: '개발실',   sub: 'DEV' },
-  research: { id: 'research', label: '리서치',   sub: 'RESEARCH' },
-  meeting:  { id: 'meeting',  label: '회의실',   sub: 'MEETING' },
-  lobby:    { id: 'lobby',    label: '로비',     sub: 'LOBBY' },
-  test:     { id: 'test',     label: '테스트실', sub: 'TEST' },
-  server:   { id: 'server',   label: '서버실',   sub: 'SERVER' },
-  po:       { id: 'po',       label: "Jia's Office", sub: 'FOUNDER' },
+  archive:  { id: 'archive',  label: '아카이브', sub: 'ARCHIVE',  desc: '코드·파일을 읽고 탐색' },
+  dev:      { id: 'dev',      label: '개발실',   sub: 'DEV',      desc: '코드를 작성·수정' },
+  research: { id: 'research', label: '리서치',   sub: 'RESEARCH', desc: '웹 검색·문서 조사' },
+  meeting:  { id: 'meeting',  label: '회의실',   sub: 'MEETING',  desc: '계획·스펙 작성, 워크플로우 조율' },
+  lobby:    { id: 'lobby',    label: '로비',     sub: 'LOBBY',    desc: '턴 사이 대기·휴식' },
+  test:     { id: 'test',     label: '테스트실', sub: 'TEST',     desc: '테스트 실행' },
+  server:   { id: 'server',   label: '서버실',   sub: 'SERVER',   desc: '명령 실행·빌드·프로세스' },
+  po:       { id: 'po',       label: "Jia's Office", sub: 'FOUNDER', desc: '대표에게 승인 요청' },
   founder:  { id: 'founder',  label: "Jia's Office", sub: 'FOUNDER' },
   corridor: { id: 'corridor', label: '복도',     sub: 'CORRIDOR' },
 };
