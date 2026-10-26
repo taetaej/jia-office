@@ -82,7 +82,10 @@ function ingest(line: string, sessionId: string, live: boolean): void {
       if (callTags.size > 500) callTags.delete(callTags.keys().next().value as string);
     } else if (event.kind === 'tool_result') {
       const tag = callTags.get(event.callId);
-      if (tag) { event.tag = tag; callTags.delete(event.callId); }
+      // The paired call's tag wins when both exist; a parser-detected orphan tag
+      // is preserved when the call carried none.
+      if (tag && !event.tag) { event.tag = tag; }
+      callTags.delete(event.callId);
     }
   }
   buffer.push(event);

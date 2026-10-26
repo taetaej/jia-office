@@ -66,8 +66,10 @@ const TOOL_ROOM: Record<string, RoomId> = {
   create_artifact: 'dev',
 };
 
-/** Tools whose shell args, when they mention these, mean a TEST run (beats server). */
-export const TEST_HINT = /\bvitest\b|\bplaywright\b|\bjest\b|\be2e\b|npm\s+test|npm\s+run\s+test/i;
+/** Tools whose shell args, when they mention these, mean a TEST run (beats server).
+    Covers JS (vitest/jest/playwright/e2e/npm test) and common non-JS runners
+    (pytest, go test, cargo test, rspec) so test runs land in the test room across stacks. */
+export const TEST_HINT = /\bvitest\b|\bplaywright\b|\bjest\b|\be2e\b|npm\s+test|npm\s+run\s+test|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\brspec\b/i;
 
 /** Paths that indicate spec/plan writing, which routes fs edits to the meeting room. */
 const SPEC_PATH = /\/specs\/|\/spec\b|\bplan\b|\.kiro\/specs/i;

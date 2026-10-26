@@ -182,3 +182,56 @@ describe('reaction tags', () => {
     expect(parseLine(line({ type: 'interaction_resolved', outcome: 'cancelled' }), 's', 0)?.detail).toBe('rejected');
   });
 });
+
+describe('tool_result', () => {
+  const line = (payload: Record<string, unknown>) => JSON.stringify({ timestamp: 1, payload });
+
+  it('(a) sets tool/kind/ok/callId from a named successful result', () => {
+    const ev = parseLine(line({ type: 'tool_result', toolName: 'read_file', toolCallId: 'c1', success: true }), 's', 0);
+    expect(ev?.tool).toBe('read_file');
+    expect(ev?.kind).toBe('tool_result');
+    expect(ev?.ok).toBe(true);
+    expect(ev?.callId).toBe('c1');
+  });
+
+  it('(b) leaves tool undefined when the result carries no name', () => {
+    const ev = parseLine(line({ type: 'tool_result', toolCallId: 'c2', success: true }), 's', 0);
+    expect(ev?.tool).toBeUndefined();
+  });
+
+  it('(c) recovers the name from `name` and the id from `id`', () => {
+    const ev = parseLine(line({ type: 'tool_result', name: 'execute_bash', id: 'c3' }), 's', 0);
+    expect(ev?.tool).toBe('execute_bash');
+    expect(ev?.callId).toBe('c3');
+  });
+
+  it("(d) labels every tool_result '결과'", () => {
+    expect(parseLine(line({ type: 'tool_result', toolCallId: 'c4', success: true }), 's', 0)?.label).toBe('결과');
+    expect(parseLine(line({ type: 'tool_result', name: 'execute_bash', id: 'c5' }), 's', 0)?.label).toBe('결과');
+  });
+
+  it('(e) self-detects test/commit tags via the exact command/output chain', () => {
+    expect(parseLine(line({ type: 'tool_result', command: 'npx vitest run' }), 's', 0)?.tag).toBe('test');
+    expect(parseLine(line({ type: 'tool_result', command: 'git commit -m x' }), 's', 0)?.tag).toBe('commit');
+    expect(parseLine(line({ type: 'tool_result', command: 'ls' }), 's', 0)?.tag).toBeUndefined();
+    expect(parseLine(line({ type: 'tool_result', args: { command: 'pytest -q' } }), 's', 0)?.tag).toBe('test');
+    // non-JS runners added to TEST_HINT
+    expect(parseLine(line({ type: 'tool_result', command: 'go test ./...' }), 's', 0)?.tag).toBe('test');
+    expect(parseLine(line({ type: 'tool_result', command: 'cargo test' }), 's', 0)?.tag).toBe('test');
+  });
+
+  it('(f) never surfaces a secret or control char verbatim', () => {
+    const ev = parseLine(
+      line({ type: 'tool_result', toolName: 'execute_bash\u0000', toolCallId: 'c6', output: 'token: ghp_abcdefghijklmnop1234', command: 'git commit -m "add API_KEY=sk-proj_abcdefghijklmn"' }),
+      's',
+      0,
+    );
+    // tool name is sanitized (control char stripped), never the raw payload text
+    expect(ev?.tool).toBe('execute_bash');
+    expect(ev?.tag).toBe('commit');
+    const serialized = JSON.stringify(ev);
+    expect(serialized.includes('ghp_abcdefghijklmnop1234')).toBe(false);
+    expect(serialized.includes('sk-proj_abcdefghijklmn')).toBe(false);
+    expect(serialized.includes('\u0000')).toBe(false);
+  });
+});

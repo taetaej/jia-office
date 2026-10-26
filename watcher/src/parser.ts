@@ -51,6 +51,26 @@ function baseName(p: unknown): string {
   return typeof p === 'string' ? p.split(/[\\/]/).filter(Boolean).pop() ?? '' : '';
 }
 
+/** Coerce an unknown value to a string for regex testing; non-strings become ''. */
+function str(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+/**
+ * Resolve the display tool name for an event.
+ * - tool_call: the toolName.
+ * - tool_result: the first present of toolName / name / tool (results vary by producer).
+ * Returns undefined when no usable name is present (the web recovers via callId pairing).
+ */
+function toolNameFor(payload: RawPayload): string | undefined {
+  if (payload.type === 'tool_call') return sanitize(payload.toolName, MAX_LABEL) || undefined;
+  if (payload.type === 'tool_result') {
+    const name = str(payload.toolName) || str(payload.name) || str(payload.tool);
+    return sanitize(name, MAX_LABEL) || undefined;
+  }
+  return undefined;
+}
+
 /** One-line, display-safe summary of what the agent is doing (speech bubble). */
 function detailFor(payload: RawPayload): string | undefined {
   const clip = (x: unknown) => {
@@ -102,6 +122,8 @@ function labelFor(payload: RawPayload): string {
   switch (type) {
     case 'tool_call':
       return sanitize(payload.toolName ?? 'tool', MAX_LABEL);
+    case 'tool_result':
+      return '결과';
     case 'assistant':
       return payload.operationType === 'Reasoning' ? 'thinking' : 'speaking';
     case 'user':
@@ -152,16 +174,25 @@ export function parseLine(
     kind: kindFor(payload.type),
     room,
     label: labelFor(payload),
-    tool: payload.type === 'tool_call' ? sanitize(payload.toolName, MAX_LABEL) : undefined,
+    tool: toolNameFor(payload),
   };
 
   const detail = detailFor(payload);
   if (detail) event.detail = detail;
-  if (typeof payload.toolCallId === 'string') event.callId = payload.toolCallId.slice(0, 80);
+  const rawCallId = payload.toolCallId ?? payload.callId ?? payload.id;
+  if (typeof rawCallId === 'string') event.callId = rawCallId.slice(0, 80);
   if (payload.type === 'tool_call') {
     const cmd = typeof payload.args?.command === 'string' ? payload.args.command : '';
     if (TEST_HINT.test(cmd)) event.tag = 'test';
     else if (/\bgit\s+(commit|push)\b/.test(cmd)) event.tag = 'commit';
+  }
+  if (payload.type === 'tool_result') {
+    // Orphan tool_result (no paired call tag in index.ts): self-detect test/commit
+    // by scanning command/output text. The text is read ONLY to test the regex and
+    // is never stored or emitted (W5).
+    const text = str(payload.args?.command) || str(payload.command) || str(payload.output);
+    if (TEST_HINT.test(text)) event.tag = 'test';
+    else if (/\bgit\s+(commit|push)\b/.test(text)) event.tag = 'commit';
   }
   if (payload.type === 'tool_result' && typeof payload.success === 'boolean') event.ok = payload.success;
   if (payload.type === 'interaction_resolved') {
