@@ -17,16 +17,19 @@ import {
   sessionsRoot,
   LineTailer,
 } from './sessions.js';
-import { parseLine } from './parser.js';
+import { parseAny } from './claude.js';
 import { RingBuffer } from './ringBuffer.js';
 import { RoomState } from './roomState.js';
 import { scanWorkflows } from './workflows.js';
 import { computeCrew } from './crew.js';
 
 const WS_PORT = clampPort(process.env.KO_WS_PORT, 8787);
-const CATCHUP_EVENTS = 50;
+const CATCHUP_EVENTS = 400;
+/** Catch-up replays the last few whole turns, so each card starts at its request. */
+const RECENT_TURNS = 3;
+const MAX_REPLAY_LINES = 20_000;
 const POLL_MS = 350; // within the 0.25–0.5s live-delta budget
-const CAPACITY = 500;
+const CAPACITY = 1200;
 
 function clampPort(raw: string | undefined, fallback: number): number {
   const n = Number(raw);
@@ -67,7 +70,7 @@ function broadcast(frame: ServerFrame): void {
 
 /** Ingest one raw line into the buffer + room state, and broadcast it live. */
 function ingest(line: string, sessionId: string, live: boolean): void {
-  const event = parseLine(line, sessionId, Date.now(), {
+  const events = parseAny(line, sessionId, Date.now(), {
     onUnknown: (tool) => {
       if (!unknownTools.has(tool)) {
         unknownTools.add(tool);
@@ -75,7 +78,10 @@ function ingest(line: string, sessionId: string, live: boolean): void {
       }
     },
   });
-  if (!event) return;
+  for (const event of events) ingestEvent(event, live);
+}
+
+function ingestEvent(event: ActivityEvent, live: boolean): void {
   if (event.callId) {
     if (event.kind === 'tool_call' && event.tag) {
       callTags.set(event.callId, event.tag);
@@ -103,17 +109,17 @@ async function activateSession(sessionId: string, replay: boolean): Promise<void
   tailer = tl;
 
   if (replay) {
-    // Cold catch-up: read the whole file, keep only the last CATCHUP_EVENTS lines.
+    // Cold catch-up: read the whole file and replay from the start of the last
+    // few turns (so every card in the log begins with its request).
     tl.seekStart();
     const lines = await tl.readNewLines();
-    const recent = lines.slice(-CATCHUP_EVENTS * 2); // over-read; filtered to events below
-    let kept = 0;
-    // Re-walk to assign rooms in order; keep buffer to CATCHUP_EVENTS events.
-    for (const line of recent) {
-      ingest(line, sessionId, false);
-      kept++;
+    let start = Math.max(0, lines.length - MAX_REPLAY_LINES);
+    let turns = 0;
+    for (let i = lines.length - 1; i >= start; i--) {
+      if (!parseAny(lines[i], sessionId, 0).some((e) => e.kind === 'turn_start')) continue;
+      if (++turns >= RECENT_TURNS) { start = i; break; }
     }
-    void kept;
+    for (const line of lines.slice(start)) ingest(line, sessionId, false);
   } else {
     await tl.seekEnd();
   }

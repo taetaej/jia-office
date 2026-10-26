@@ -77,6 +77,8 @@ const PROC_HEIGHT: Record<string, number> = {
 };
 
 const CALICO: CatColors = { body: '#f3efe9', patchA: '#d98a4e', patchB: '#2a2622', muzzle: '#f3efe9', eye: '#2f4a38' };
+// Claude Code sessions get a Claude-orange tabby as their agent cat.
+const CLAUDE_ORANGE: CatColors = { body: '#e8946f', patchA: '#d97757', patchB: '#f6dccd', muzzle: '#fbeee6', eye: '#3b2f2a' };
 const BOSS_TABBY: CatColors = { body: '#b9bec6', patchA: '#8a929c', patchB: '#6f7782', muzzle: '#f6f3ee', eye: '#d79a2b' };
 // The founder (boss) cat: a pretty white-based cheese cat — creamy white body with
 // soft orange-marmalade patches (a white van-pattern ginger), cream muzzle, warm
@@ -1364,6 +1366,20 @@ export class Office3D {
   }
 
   /** The name tag under the bubble (e.g. the session name). */
+  /** Kiro sessions are watched by the calico; Claude Code sessions by an orange tabby. */
+  setAgentSource(source: 'kiro' | 'claude'): void {
+    if (this.agentSource === source) return;
+    this.agentSource = source;
+    this.character.remove(this.catBody);
+    const parts = makeCat(source === 'claude' ? CLAUDE_ORANGE : CALICO);
+    this.agentParts = parts;
+    this.catBody = parts.cat;
+    this.catTail = parts.tail;
+    this.character.add(parts.cat);
+    this.agentHud.el.classList.toggle('src-claude', source === 'claude');
+  }
+  private agentSource: 'kiro' | 'claude' = 'kiro';
+
   setAgentName(name: string): void {
     this.agentHud.setName(name);
   }
@@ -1491,6 +1507,7 @@ export class Office3D {
     root.scale.setScalar(0.01);
     this.scene.add(root);
     const hud = new Hud(this.labelRoot, '', 'crew');
+    if (m.source === 'claude') hud.el.classList.add('src-claude');
     const c = Object.assign(new CrewCat(m.id, root, cat, tail, hud), { spawnAt: performance.now() });
     c.parts = parts;
     if (this.elev) {

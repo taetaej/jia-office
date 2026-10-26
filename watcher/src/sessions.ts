@@ -1,4 +1,5 @@
-// sessions.ts — discover Kiro sessions under ~/.kiro/sessions and incrementally
+// sessions.ts — discover Kiro sessions under ~/.kiro/sessions (plus Claude Code
+// sessions, see claude.ts) and incrementally
 // tail a session's messages.jsonl (read only newly appended bytes, buffer a
 // partial last line until a newline arrives, reset on truncation/shrink).
 
@@ -6,6 +7,7 @@ import { createReadStream, promises as fsp } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionInfo } from './types.js';
+import { claudePath, discoverClaudeSessions } from './claude.js';
 
 export function sessionsRoot(): string {
   return join(homedir(), '.kiro', 'sessions');
@@ -51,10 +53,12 @@ export async function discoverSessions(): Promise<SessionInfo[]> {
         name,
         hash,
         lastActivity: mtime,
+        source: 'kiro',
         ...subs.get(sessionId),
       });
     }
   }
+  out.push(...(await discoverClaudeSessions()));
   // A workflow keeps its parent busy: sub-agent activity counts as the parent's.
   const byId = new Map(out.map((s) => [s.sessionId, s]));
   for (const s of out) {
@@ -108,6 +112,7 @@ async function readTitle(sessionJsonPath: string, fallbackHash: string): Promise
 }
 
 export function messagesPath(root: string, info: SessionInfo): string {
+  if (info.source === 'claude') return claudePath(info);
   return join(root, info.hash, info.sessionId, 'messages.jsonl');
 }
 

@@ -57,6 +57,8 @@ export interface CrewMember {
   /** the member's own session id (stable across updates). */
   id: string;
   kind: 'workflow' | 'session';
+  /** where the member's session comes from */
+  source?: 'kiro' | 'claude';
   /** display name: the sub-agent name or the session title. */
   name: string;
   /** workflow name, for workflow members. */
@@ -83,6 +85,8 @@ export interface SessionInfo {
   /** Last-activity epoch ms (file mtime of messages.jsonl). For a top-level
       session this includes its workflow sub-agents' activity. */
   lastActivity: number;
+  /** Where the session comes from (default: Kiro). */
+  source?: 'kiro' | 'claude';
   /** Set on workflow sub-agent sessions: the session that ran the workflow. */
   parentId?: string;
   /** Sub-agents: the workflow step (node id, e.g. "plan", "code"). */

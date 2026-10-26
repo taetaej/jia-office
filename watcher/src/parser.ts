@@ -85,6 +85,10 @@ function detailFor(payload: RawPayload): string | undefined {
     const target = baseName(args.path ?? args.filePath ?? payload.filePath) || (typeof args.query === 'string' ? args.query : '');
     return clip(target ? `${title || payload.toolName} · ${target}` : title);
   }
+  if (payload.type === 'user' && typeof payload.content === 'string') {
+    // the request itself: its first line heads the turn in the activity log
+    return clip(payload.content.split('\n').find((l) => l.trim()) ?? '');
+  }
   if (payload.type === 'assistant' && payload.operationType !== 'Reasoning' && typeof payload.content === 'string') {
     // first sentence or line of what the assistant said, without markdown noise
     const plain = payload.content.replace(/```[\s\S]*?```/g, ' ').replace(/[#*`>_~]+/g, '').trim();

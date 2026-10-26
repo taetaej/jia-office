@@ -245,11 +245,10 @@ body {
 .activity-search::placeholder { color: hsl(var(--faint)); }
 .activity-search:focus { outline: none; border-color: hsl(var(--faint)); }
 
-/* ---- activity log: blocks + rows ---- */
+/* ---- activity log: turn cards ---- */
 .activity-list { padding: 4px 8px 16px; }
-/* Each turn is a card so the grouping reads at a glance: a bordered, tinted
-   block with a bold header and its rows visibly nested beneath it. */
-.activity-block {
+.log-empty { list-style: none; padding: 24px 8px; text-align: center; font-size: 12px; color: hsl(var(--faint)); }
+.turn-card {
   list-style: none;
   margin: 0 0 8px;
   border: 1px solid hsl(var(--border));
@@ -257,75 +256,67 @@ body {
   background: hsl(var(--panel));
   overflow: hidden;
 }
-/* loose (un-grouped) rows get no card chrome — they read as a plain list */
-.activity-block.loose {
-  border: none; background: none; margin: 0 0 2px;
-}
-
-.block-head {
-  display: flex; align-items: center; gap: 8px;
+.turn-card.live { border-color: hsl(var(--green-soft) / 0.6); box-shadow: 0 0 0 2px hsl(var(--green-soft) / 0.12); }
+.turn-head {
+  display: flex; align-items: center; gap: 7px;
   padding: 8px 10px;
   cursor: pointer;
-  background: hsl(var(--panel-2) / 0.6);
-  border-bottom: 1px solid transparent;
+  background: hsl(var(--panel-2) / 0.55);
 }
-.block-head:hover { background: hsl(var(--panel-2)); }
-/* when expanded, separate the header from its rows with a divider */
-.activity-block.expanded .block-head { border-bottom-color: hsl(var(--border)); }
-.block-caret { color: hsl(var(--muted)); font-size: 10px; width: 10px; flex: none; }
-.block-time {
-  color: hsl(var(--ink)); font-variant-numeric: tabular-nums;
-  font-size: 11px; font-weight: 700; flex: none;
-}
-.block-counts {
+.turn-head:hover { background: hsl(var(--panel-2)); }
+.turn-card.expanded .turn-head { border-bottom: 1px solid hsl(var(--border)); }
+.turn-status { flex: none; font-size: 11px; width: 14px; text-align: center; }
+.turn-status[data-state="live"] { color: hsl(var(--green)); animation: turn-pulse 1.4s ease-in-out infinite; }
+@keyframes turn-pulse { 50% { opacity: .35; } }
+.turn-title {
   flex: 1; min-width: 0;
-  font-size: 11px; font-weight: 600; color: hsl(var(--fg));
+  font-size: 12px; font-weight: 700; color: hsl(var(--ink));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.block-dur {
-  flex: none; font-size: 10px; color: hsl(var(--muted));
-  font-variant-numeric: tabular-nums;
+.turn-card.expanded .turn-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.turn-title.muted { color: hsl(var(--muted)); font-weight: 600; }
+.turn-meta { flex: none; font-size: 10px; color: hsl(var(--muted)); font-variant-numeric: tabular-nums; }
+.src-badge {
+  flex: none; font-size: 9px; font-weight: 700; letter-spacing: .3px;
+  padding: 1px 5px; border-radius: 4px;
 }
+.src-badge.kiro { color: hsl(262 60% 48%); background: hsl(262 80% 96%); }
+.src-badge.claude { color: hsl(15 65% 46%); background: hsl(18 90% 95%); }
 
-/* rows nested under the header: a hairline rail on the left shows containment */
-.block-rows {
-  list-style: none; margin: 0; padding: 2px 6px 4px;
-  background: hsl(var(--panel));
+.turn-steps { list-style: none; margin: 0; padding: 4px 8px 2px; }
+.turn-step {
+  display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: baseline;
+  padding: 4px 2px; font-size: 12px; color: hsl(var(--fg));
 }
-.activity-row {
-  display: grid;
-  grid-template-columns: auto auto 1fr auto;
-  gap: 6px 8px;
-  align-items: baseline;
-  padding: 5px 6px 5px 8px;
-  font-size: 12px;
-  border-radius: 6px;
-}
-.activity-row + .activity-row { border-top: 1px solid hsl(var(--border) / 0.4); }
-.activity-row:hover { background: hsl(var(--panel-2) / 0.5); }
-.row-bar {
-  width: 3px; align-self: stretch; border-radius: 2px;
-  background: transparent;
-}
-.row-icon { font-size: 11px; flex: none; }
-.row-label {
-  min-width: 0;
-  color: hsl(var(--fg));
-  overflow: hidden; text-overflow: ellipsis; word-break: keep-all;
-  white-space: nowrap;
-}
-.row-target { color: hsl(var(--muted)); font-size: 11px; }
-.row-meta {
-  flex: none;
-  color: hsl(var(--faint)); font-variant-numeric: tabular-nums;
-  font-size: 10px; white-space: nowrap;
-}
-.row-outcome.pending { color: hsl(var(--faint)); }
+.turn-step + .turn-step { border-top: 1px dashed hsl(var(--border) / 0.6); }
+.step-icon { font-size: 11px; text-align: center; }
+.step-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-step.quote .step-text { white-space: normal; color: hsl(var(--muted)); font-style: italic; }
+.step-mark { font-size: 10px; color: hsl(var(--faint)); }
+.turn-step.ok .step-mark { color: hsl(var(--green)); }
+.turn-step.fail .step-text, .turn-step.fail .step-mark { color: hsl(2 55% 46%); }
+.turn-step.pending .step-mark { color: hsl(var(--faint)); }
 
-/* emphasis — fail is red, approve is amber; success stays neutral ink (never green) */
-.activity-row.fail .row-bar { background: hsl(2 60% 52%); }
-.activity-row.fail .row-label { color: hsl(2 55% 44%); }
-.activity-row.approve .row-bar { background: hsl(24 85% 62%); }
+.turn-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 4px 10px 7px; font-size: 10.5px; color: hsl(var(--muted));
+}
+.raw-toggle {
+  margin-left: auto; font: inherit; font-size: 10px; color: hsl(var(--faint));
+  background: none; border: none; cursor: pointer; padding: 0;
+}
+.raw-toggle:hover { color: hsl(var(--fg)); text-decoration: underline; }
+.turn-raw {
+  margin: 0; padding: 6px 10px 8px 26px; list-style: decimal;
+  font-size: 10px; line-height: 1.55; color: hsl(var(--muted));
+  background: hsl(var(--panel-2) / 0.4); border-top: 1px solid hsl(var(--border));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+.turn-raw li.silent { color: hsl(var(--faint)); }
+
+/* floor guide: where each session comes from */
+.floor-src { margin-right: 4px; vertical-align: 1px; }
 
 /* ---- stage ---- */
 #stage-wrap {
@@ -496,3 +487,6 @@ body {
   word-break: keep-all;
 }
 .legend-cell.active .legend-name { color: hsl(var(--green)); }
+
+/* Claude Code cats: an orange status dot on the name tag */
+.cat-hud.src-claude .cat-tag::before { background: hsl(15 70% 55%); }

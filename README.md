@@ -7,7 +7,10 @@ WebGL)로 보여주는 작고 로컬에서 도는 **독립형** 뷰어예요. �
 보고하기까지. 워크플로우 서브에이전트와 최근 다른 세션들은 **직원냥**(크루 고양이)으로
 나타나서, 엘리베이터를 타고 출근해 에이전트냥 옆에서 함께 일해요.
 
-로그는 `~/.kiro/sessions/<hash>/<sessionId>/messages.jsonl`에서 읽어요. 로그를 **수정하지
+로그는 `~/.kiro/sessions/<hash>/<sessionId>/messages.jsonl`에서 읽어요. **Claude Code**
+세션(`~/.claude/projects/<프로젝트>/<세션>.jsonl`, 최근 2주)도 같이 읽어서, 층별 안내에
+`Kiro`/`Claude` 배지로 구분해 보여 주고 Claude 세션은 주황 **클로드냥**이 맡아요. Claude의
+서브에이전트(Task/Agent 호출)는 워크플로우처럼 엘리베이터로 출근해요. 로그를 **수정하지
 않고**, 아무것도 **외부로 전송하지 않으며**, 모든 로그 내용을 신뢰할 수 없는 데이터로
 취급해요(`textContent`로만 렌더링, 길이 제한, `innerHTML` 없음, eval 없음, 비밀값 노출 없음).
 

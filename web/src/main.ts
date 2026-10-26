@@ -5,6 +5,7 @@
 import { ROOMS, ROOM_ORDER, resolveRoom, type RoomId } from './rooms.js';
 import { Office3D, type BubbleInfo } from './scene3d.js';
 import { OfficeSocket, type ActivityEvent, type SessionInfo } from './socket.js';
+import { ActivityLog, CATEGORY, type Category, type LogFilter } from './activityLog.js';
 
 const canvas = document.getElementById('office') as HTMLCanvasElement;
 const roomLabels = document.getElementById('room-labels')!;
@@ -162,7 +163,10 @@ function renderFloors(): void {
     main.className = 'floor-main';
     const name = document.createElement('div');
     name.className = 'floor-name';
-    name.textContent = s.name; // untrusted -> textContent
+    const src = document.createElement('span');
+    src.className = `src-badge floor-src ${s.source ?? 'kiro'}`;
+    src.textContent = s.source === 'claude' ? 'Claude' : 'Kiro';
+    name.append(src, s.name); // untrusted -> text node
     const meta = document.createElement('div');
     meta.className = 'floor-meta';
     meta.textContent = `${s.hash.slice(0, 6)} · ${relativeTime(s.lastActivity)}`;
@@ -182,272 +186,13 @@ function renderFloors(): void {
   }
 }
 
-// ---- activity log: category layer (pure) ------------------------------------
-// A1/D2: every log-derived string stays textContent-only (S1). The category
-// KO labels + icons are hard-coded ASCII/emoji constants here — NEVER sourced
-// from the (untrusted) payload.
-export type Category =
-  | 'read' | 'write' | 'run' | 'test' | 'commit'
-  | 'web' | 'plan' | 'approve' | 'done' | 'talk' | 'other';
-
-interface CategoryMeta { label: string; icon: string; }
-const CATEGORY: Record<Category, CategoryMeta> = {
-  read:    { label: '읽기',   icon: '👀' },
-  write:   { label: '작성',   icon: '✏️' },
-  run:     { label: '실행',   icon: '⌨️' },
-  test:    { label: '테스트', icon: '🧪' },
-  commit:  { label: '커밋',   icon: '🚀' },
-  web:     { label: '웹',     icon: '🌐' },
-  plan:    { label: '계획',   icon: '📝' },
-  approve: { label: '승인',   icon: '✋' },
-  done:    { label: '완료',   icon: '✅' },
-  talk:    { label: '대화',   icon: '💬' },
-  other:   { label: '기타',   icon: '•' },
-};
-/** Count display order per design §1. */
-const CATEGORY_ORDER: Category[] = [
-  'read', 'write', 'run', 'test', 'commit', 'web', 'plan', 'approve', 'done', 'talk', 'other',
-];
-
-// Tool-name → category sets (mirror of watcher roomMap TOOL_ROOM; the web keeps
-// its own copy because the watcher ships rooms, not categories).
-const READ_TOOLS = new Set(['read_file', 'read_code', 'grep_search', 'file_search', 'list_directory']);
-const WRITE_TOOLS = new Set(['str_replace', 'fs_write', 'fs_append', 'semantic_rename', 'smart_relocate', 'create_artifact']);
-const RUN_TOOLS = new Set(['execute_bash', 'control_bash_process', 'get_process_output']);
-const WEB_TOOLS = new Set(['remote_web_search', 'web_fetch']);
-const PLAN_TOOLS = new Set(['run_workflow', 'update_workflow', 'inspect_workflow', 'validate_workflow', 'send_message', 'todo_list', 'update_session_information']);
-
-/** Category for a tool name alone (no room/tag context). undefined = unknown. */
-function categoryForTool(tool: string): Category | undefined {
-  if (READ_TOOLS.has(tool)) return 'read';
-  if (WRITE_TOOLS.has(tool)) return 'write';
-  if (RUN_TOOLS.has(tool)) return 'run';
-  if (WEB_TOOLS.has(tool)) return 'web';
-  if (PLAN_TOOLS.has(tool)) return 'plan';
-  return undefined;
-}
-
-/** D2 §1 precedence. Pure — depends only on the event (+ paired-call recovery
-    handled by the caller via a pre-recovered tool name). */
-export function categoryOf(ev: ActivityEvent): Category {
-  const r = ev.room ? resolveRoom(ev.room) : null;
-  switch (ev.kind) {
-    case 'turn_end':
-      return 'done';
-    case 'pending_interaction':
-    case 'interaction_resolved':
-      return 'approve';
-  }
-  // tag wins over tool-name/room for tool events
-  if (ev.tag === 'test') return 'test';
-  if (ev.tag === 'commit') return 'commit';
-  if (ev.kind === 'tool_call' || ev.kind === 'tool_result') {
-    const tool = ev.tool;
-    // spec-room guard: a write-ish tool fired in the meeting room is planning
-    if (r === 'meeting' && tool && WRITE_TOOLS.has(tool)) return 'plan';
-    if (tool) {
-      const byTool = categoryForTool(tool);
-      if (byTool) return byTool;
-    }
-    // room fallback when the tool name is unknown/absent
-    return roomCategory(r);
-  }
-  if (ev.kind === 'assistant') {
-    // thinking is planning; a plain assistant "say" is conversation
-    return ev.label === 'thinking' ? 'plan' : 'talk';
-  }
-  // user turns (and anything else without a work room) read as conversation
-  if (ev.kind === 'user') return 'talk';
-  return roomCategory(r);
-}
-
-/** Room → category fallback switch (design §1). */
-function roomCategory(r: RoomId | null): Category {
-  switch (r) {
-    case 'archive': return 'read';
-    case 'dev': return 'write';
-    case 'server': return 'run';
-    case 'test': return 'test';
-    case 'research': return 'web';
-    case 'meeting': return 'plan';
-    case 'founder': return 'approve';
-    default: return 'other'; // corridor / lobby / null
-  }
-}
-
-// ---- activity log: pure model (C1/C2/D6/D7) ---------------------------------
-type RowStatus = 'pending' | 'ok' | 'fail' | 'none';
-interface LogRow {
-  key: string;
-  ev: ActivityEvent;
-  category: Category;
-  status: RowStatus;
-  resultTs?: number;
-}
-interface TurnBlock {
-  id: string;
-  startTs: number;
-  endTs?: number;
-  open: boolean;
-  rows: LogRow[];
-  counts: Partial<Record<Category, number>>;
-}
-
-let blocks: TurnBlock[] = [];               // newest-first
-const pairIndex = new Map<string, LogRow>(); // callId → pending row (cap 256, FIFO)
-const toggled = new Set<string>();           // block ids the user manually flipped (session-only)
-const PAIR_CAP = 256;
-const ROW_CAP = 200;
-
-function pairIndexSet(callId: string, row: LogRow): void {
-  pairIndex.set(callId, row);
-  while (pairIndex.size > PAIR_CAP) {
-    const oldest = pairIndex.keys().next().value as string | undefined;
-    if (oldest === undefined) break;
-    pairIndex.delete(oldest);
-  }
-}
-
-let blockSeq = 0;
-function currentOpenBlock(): TurnBlock | undefined {
-  // the newest block, if it is open
-  const b = blocks[0];
-  return b && b.open ? b : undefined;
-}
-
-/** Route one event into the pure block model. DOM-free.
-    EVERYTHING is kept — the log is a complete record of the session (tools,
-    thoughts, conversation, approvals, system events). Categories/icons/colors
-    organize it; the filter chips let the user narrow it, but 전체 shows it all. */
-function applyEvent(ev: ActivityEvent): void {
-  if (ev.kind === 'turn_start') {
-    for (const b of blocks) b.open = false;
-    blocks.unshift({ id: `turn:${blockSeq++}`, startTs: ev.ts, open: true, rows: [], counts: {} });
-    return;
-  }
-  if (ev.kind === 'turn_end') {
-    const open = currentOpenBlock();
-    if (open) {
-      open.endTs = ev.ts;
-      open.open = false;
-      open.counts.done = (open.counts.done ?? 0) + 1;
-    }
-    return;
-  }
-
-  // A work/talk event. Find the open block, or start an implicit one. Implicit
-  // blocks ('auto:') behave exactly like turn blocks (header + card) so NOTHING
-  // ends up in an un-grouped flat list — every row lives in a collapsible block.
-  let block = currentOpenBlock();
-  if (!block) {
-    block = { id: `auto:${blockSeq++}`, startTs: ev.ts, open: true, rows: [], counts: {} };
-    blocks.unshift(block);
-  }
-
-  const category = categoryOf(ev);
-
-  // pairing: tool_result closes a pending tool_call row in place
-  if (ev.kind === 'tool_result' && ev.callId) {
-    const pending = pairIndex.get(ev.callId);
-    if (pending) {
-      pending.status = ev.ok === false ? 'fail' : 'ok';
-      pending.resultTs = ev.ts;
-      // tool recovery: adopt the result's tool name if the call had none
-      if (!pending.ev.tool && ev.tool) pending.ev.tool = ev.tool;
-      // carry the result's tag onto the paired row (test/commit emphasis)
-      if (ev.tag && !pending.ev.tag) pending.ev.tag = ev.tag;
-      pairIndex.delete(ev.callId);
-      return; // do NOT re-count or add a new row
-    }
-    // orphan result: fall through to a standalone row
-  }
-
-  const status: RowStatus =
-    ev.kind === 'tool_call' ? 'pending'
-    : ev.kind === 'tool_result' ? (ev.ok === false ? 'fail' : 'ok')
-    : 'none';
-
-  const row: LogRow = { key: `${ev.seq}:${ev.ts}`, ev, category, status };
-  block.rows.push(row);
-  block.counts[category] = (block.counts[category] ?? 0) + 1;
-
-  if (ev.kind === 'tool_call' && ev.callId) pairIndexSet(ev.callId, row);
-
-  enforceRowCap();
-}
-
-/** D7: keep the whole model under ROW_CAP rows. Drop oldest rows first, then
-    emptied trailing blocks. Walk oldest-first (end of the newest-first array). */
-function enforceRowCap(): void {
-  let total = 0;
-  for (const b of blocks) total += b.rows.length;
-  while (total > ROW_CAP && blocks.length) {
-    const oldest = blocks[blocks.length - 1];
-    if (oldest.rows.length) {
-      oldest.rows.shift();
-      total--;
-    }
-    // drop an emptied trailing block unless it is the live open block
-    if (oldest.rows.length === 0 && oldest !== currentOpenBlock()) {
-      blocks.pop();
-    }
-  }
-}
-
-/** Zero-padded HH:MM in local time (locale-independent — no "오전 10:5" clipping). */
-function fmtClock(ts: number): string {
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
-function fmtDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h}시간 ${m}분`;
-  if (m > 0) return `${m}분 ${s}초`;
-  return `${s}초`;
-}
-
-/** A block's effective expanded state. A manual toggle flips the default
-    (open blocks default expanded, closed blocks default collapsed). */
-function isExpanded(b: TurnBlock): boolean {
-  return toggled.has(b.id) ? !b.open : b.open;
-}
-
-// ---- activity log: filter + search (B1-B4) ----------------------------------
-interface LogFilter { cats: Set<Category>; q: string; }
+// ---- activity log: turn cards (see activityLog.ts) -----------------------------
 const filter: LogFilter = { cats: new Set(), q: '' };
 const FILTER_CATS_KEY = 'ko.activity.filter.cats';
 const FILTER_Q_KEY = 'ko.activity.filter.q';
 const GUIDE_COLLAPSED_KEY = 'ko.guide.collapsed';
-
-export function rowVisible(row: LogRow, f: LogFilter): boolean {
-  // 전체 (no chips) shows EVERYTHING — the full session record. Chips only
-  // narrow the view when the user opts in; they never hide anything by default.
-  const catOk = f.cats.size === 0 || f.cats.has(row.category);
-  if (!catOk) return false;
-  if (!f.q) return true;
-  const hay = `${row.ev.label} ${row.ev.detail ?? ''} ${row.ev.tool ?? ''} ${roomLabelFor(row.ev)}`.toLowerCase();
-  return hay.includes(f.q.toLowerCase());
-}
-
-/** approve/done rows are structural — they survive category filtering so a
-    turn's outcome is never hidden by a chip selection. */
-function isStructural(row: LogRow): boolean {
-  return row.category === 'approve' || row.category === 'done';
-}
-function rowVisibleStructural(row: LogRow, f: LogFilter): boolean {
-  if (isStructural(row)) {
-    if (!f.q) return true;
-    const hay = `${row.ev.label} ${row.ev.detail ?? ''} ${row.ev.tool ?? ''}`.toLowerCase();
-    return hay.includes(f.q.toLowerCase());
-  }
-  return rowVisible(row, f);
-}
+const log = new ActivityLog(activityList, filter);
+const renderLog = (): void => log.render();
 
 function loadFilter(): void {
   try {
@@ -467,155 +212,6 @@ function persistFilterCats(): void {
 }
 function persistFilterQ(): void {
   try { localStorage.setItem(FILTER_Q_KEY, filter.q); } catch { /* noop */ }
-}
-
-// ---- activity log: rendering (C1/C2/D1-D7/B-render) --------------------------
-function roomLabelFor(ev: ActivityEvent): string {
-  if (!ev.room) return '';
-  const r = resolveRoom(ev.room);
-  return r ? ROOMS[r].label : '';
-}
-
-function buildRow(row: LogRow): HTMLLIElement {
-  const ev = row.ev;
-  const li = document.createElement('li');
-  li.className = 'activity-row';
-  if (row.status === 'fail') li.classList.add('fail');
-  if (row.category === 'approve') li.classList.add('approve');
-
-  // color bar — keyed by RAW room id (not resolved), transparent when unknown
-  const bar = document.createElement('span');
-  bar.className = 'row-bar';
-  bar.style.background = LEGEND_SWATCH[ev.room as RoomId] ?? 'transparent';
-
-  const icon = document.createElement('span');
-  icon.className = 'row-icon';
-  icon.textContent = CATEGORY[row.category].icon;
-
-  const label = document.createElement('span');
-  label.className = 'row-label';
-  const main = ev.detail || ev.label;
-  const text = ev.question ? `${main}: ${ev.question}` : main;
-  label.textContent = text; // untrusted → textContent
-  const roomName = roomLabelFor(ev);
-  if (roomName) {
-    const target = document.createElement('span');
-    target.className = 'row-target';
-    target.textContent = roomName;
-    label.append(' ', target);
-  }
-
-  const meta = document.createElement('span');
-  meta.className = 'row-meta';
-  const whenTs = row.resultTs ?? ev.ts;
-  meta.textContent = relativeTime(whenTs);
-  meta.title = new Date(whenTs).toLocaleString('ko-KR', { hour12: false });
-  if (row.status === 'ok') {
-    const mark = document.createElement('span');
-    mark.className = 'row-outcome ok';
-    mark.textContent = '✅';
-    meta.append(' ', mark);
-  } else if (row.status === 'fail') {
-    const mark = document.createElement('span');
-    mark.className = 'row-outcome fail';
-    mark.textContent = '❌';
-    meta.append(' ', mark);
-  } else if (row.status === 'pending') {
-    const mark = document.createElement('span');
-    mark.className = 'row-outcome pending';
-    mark.textContent = '…';
-    meta.append(' ', mark);
-  }
-
-  li.append(bar, icon, label, meta);
-  return li;
-}
-
-function blockCountSummary(b: TurnBlock): string {
-  const parts: string[] = [];
-  for (const cat of CATEGORY_ORDER) {
-    if (cat === 'talk') continue; // conversation isn't "work" — keep it out of the summary
-    if (cat === 'done' || cat === 'other') continue; // omit from the summary
-    const n = b.counts[cat];
-    if (n) parts.push(`${CATEGORY[cat].icon} ${n}`);
-  }
-  return parts.join(' · ');
-}
-
-function blockDurationText(b: TurnBlock): string {
-  if (b.open) return '진행 중 · …';
-  if (b.endTs != null) return fmtDuration(b.endTs - b.startTs);
-  const last = b.rows.at(-1);
-  const end = last ? (last.resultTs ?? last.ev.ts) : b.startTs;
-  return fmtDuration(end - b.startTs);
-}
-
-function buildBlockHeader(b: TurnBlock, expanded: boolean): HTMLDivElement {
-  const head = document.createElement('div');
-  head.className = 'block-head';
-  head.dataset.blockId = b.id;
-
-  const caret = document.createElement('span');
-  caret.className = 'block-caret';
-  caret.textContent = expanded ? '▾' : '▸';
-
-  const start = document.createElement('span');
-  start.className = 'block-time';
-  start.textContent = fmtClock(b.startTs);
-
-  const counts = document.createElement('span');
-  counts.className = 'block-counts';
-  counts.textContent = blockCountSummary(b);
-
-  const dur = document.createElement('span');
-  dur.className = 'block-dur';
-  dur.textContent = blockDurationText(b);
-
-  head.append(caret, start, counts, dur);
-  head.addEventListener('click', () => {
-    if (toggled.has(b.id)) toggled.delete(b.id); else toggled.add(b.id);
-    renderLog();
-  });
-  return head;
-}
-
-function renderLog(): void {
-  activityList.textContent = '';
-  for (const b of blocks) {
-    // collect the visible rows for this block
-    const visible = b.rows.filter((row) => rowVisibleStructural(row, filter));
-    if (visible.length === 0) continue; // skip blocks with nothing to show
-
-    // Newest-first WITHIN a block too (log convention): rows are stored in
-    // arrival order (oldest→newest), so render them reversed.
-    const ordered = visible.slice().reverse();
-
-    const li = document.createElement('li');
-    li.className = 'activity-block';
-
-    // Every block (explicit turn OR implicit 'auto') gets a header + card so
-    // the whole log is consistently grouped — no stray flat list.
-    {
-      const expanded = isExpanded(b);
-      if (expanded) li.classList.add('expanded');
-      li.append(buildBlockHeader(b, expanded));
-      if (expanded) {
-        const rowsUl = document.createElement('ul');
-        rowsUl.className = 'block-rows';
-        for (const row of ordered) rowsUl.append(buildRow(row));
-        li.append(rowsUl);
-      }
-    }
-    activityList.append(li);
-  }
-}
-
-/** Rewrite only the open block's .block-dur text (ticked every 15s). */
-function renderOpenBlockHeader(): void {
-  const open = currentOpenBlock();
-  if (!open) return;
-  const head = activityList.querySelector(`.block-head[data-block-id="${open.id}"] .block-dur`);
-  if (head) (head as HTMLElement).textContent = blockDurationText(open);
 }
 
 function setRoom(room: string): void {
@@ -704,14 +300,16 @@ const socket = new OfficeSocket({
     sessions = f.sessions;
     liveSessionId = f.liveSessionId;
     activeSessionId = f.sessionId;
-    // rebuild the pure model from the catch-up history, then render once
-    blocks = [];
-    pairIndex.clear();
-    for (const ev of f.events) applyEvent(ev);
-    renderLog();
+    // rebuild the turn cards from the catch-up history, then render once
     const active = sessions.find((s) => s.sessionId === activeSessionId);
+    log.reset();
+    log.source = active?.source ?? 'kiro';
+    for (const ev of f.events) log.add(ev);
+    renderLog();
     sessionNameEl.textContent = active ? active.name : '세션';
-    office.setAgentName(active ? `에이전트냥 · ${active.name}` : '에이전트냥');
+    const agentName = active?.source === 'claude' ? '클로드냥' : '에이전트냥';
+    office.setAgentSource(active?.source ?? 'kiro');
+    office.setAgentName(active ? `${agentName} · ${active.name}` : agentName);
     // restore the bubble from recent history (an old, finished session stays quiet)
     thinkingSince = 0;
     currentStatus = 'idle'; // reset; the replay below re-derives it for the live session
@@ -732,7 +330,7 @@ const socket = new OfficeSocket({
   },
   onEvent: (f) => {
     noteActivity(f.event); // wakes a napping agent first
-    applyEvent(f.event);
+    log.add(f.event);
     renderLog();
     applyBubble(f.event);
     react(f.event);
@@ -820,4 +418,4 @@ buildLegend();
 socket.connect();
 requestAnimationFrame(frame);
 setInterval(renderFloors, 15000);
-setInterval(renderOpenBlockHeader, 15000);
+setInterval(() => log.tick(), 5000); // live card: clock + thinking time

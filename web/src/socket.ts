@@ -19,6 +19,7 @@ export interface ActivityEvent {
 export interface CrewMember {
   id: string;
   kind: 'workflow' | 'session';
+  source?: 'kiro' | 'claude';
   name: string;
   group?: string;
   status: 'working' | 'idle' | 'done';
@@ -34,6 +35,8 @@ export interface SessionInfo {
   name: string;
   hash: string;
   lastActivity: number;
+  /** where the session comes from (default: Kiro) */
+  source?: 'kiro' | 'claude';
 }
 export type ServerFrame =
   | { v: 1; type: 'catchup'; sessionId: string; sessions: SessionInfo[]; liveSessionId: string | null; currentRoom: string; events: ActivityEvent[] }

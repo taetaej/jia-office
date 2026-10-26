@@ -6,7 +6,9 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import type { ActivityEvent, CrewMember, RoomId, SessionInfo } from './types.js';
-import { parseLine, sanitize } from './parser.js';
+import { sanitize } from './parser.js';
+import { messagesPath } from './sessions.js';
+import { parseAny, pendingSubagents } from './claude.js';
 
 const TAIL_BYTES = 64 * 1024;
 /** A session that wrote within this window is "working". */
@@ -18,38 +20,48 @@ const MAX_MEMBERS = 9;
 /** Keep a finished workflow step around briefly so its cat can say goodbye. */
 const DONE_LINGER_MS = 20_000;
 
+/** Where a Claude Code sub-agent type works. */
+const SUBAGENT_ROOM: Record<string, RoomId> = { Explore: 'archive', Plan: 'meeting', 'general-purpose': 'dev', 'statusline-setup': 'dev' };
+
 const FINISHED = new Set(['completed', 'aborted', 'failed', 'cancelled', 'canceled', 'skipped']);
 
 interface Peek { mtime: number; room: RoomId | null; state: Pick<CrewMember, 'mode' | 'detail' | 'tool' | 'since'> }
 const peekCache = new Map<string, Peek>();
 
 /** Latest room + bubble state of a session, from the tail of its log (cached by mtime). */
-async function peekSession(root: string, info: SessionInfo): Promise<Peek | null> {
-  const path = join(root, info.hash, info.sessionId, 'messages.jsonl');
-  const cached = peekCache.get(path);
-  if (cached && cached.mtime === info.lastActivity) return cached;
-  let text: string;
+/** The last `bytes` of a file as complete lines (the first, likely partial, line dropped). */
+async function readTail(path: string, bytes: number): Promise<string[] | null> {
   try {
     const fh = await fsp.open(path, 'r');
     try {
       const { size } = await fh.stat();
-      const start = Math.max(0, size - TAIL_BYTES);
+      const start = Math.max(0, size - bytes);
       const buf = Buffer.alloc(size - start);
       await fh.read(buf, 0, buf.length, start);
-      text = buf.toString('utf8');
+      const lines = buf.toString('utf8').split('\n');
+      if (start > 0) lines.shift();
+      return lines;
     } finally {
       await fh.close();
     }
   } catch {
     return null;
   }
-  const lines = text.split('\n');
-  lines.shift(); // likely a partial line
+}
+
+/** Claude transcripts are mostly large bookkeeping lines, so read a deeper tail. */
+const tailBytes = (info: SessionInfo) => (info.source === 'claude' ? 1024 * 1024 : TAIL_BYTES);
+
+async function peekSession(root: string, info: SessionInfo): Promise<Peek | null> {
+  const path = messagesPath(root, info);
+  const cached = peekCache.get(path);
+  if (cached && cached.mtime === info.lastActivity) return cached;
+  const lines = await readTail(path, tailBytes(info));
+  if (!lines) return null;
   const events: ActivityEvent[] = [];
   for (const line of lines) {
     if (!line.trim()) continue;
-    const ev = parseLine(line, info.sessionId, info.lastActivity);
-    if (ev) events.push(ev);
+    events.push(...parseAny(line, info.sessionId, info.lastActivity));
   }
   let room: RoomId | null = null;
   for (let i = events.length - 1; i >= 0 && room == null; i--) room = events[i].room;
@@ -121,12 +133,27 @@ export async function computeCrew(root: string, sessions: SessionInfo[], activeS
       const info = byId.get(id);
       const peek = info ? await peekSession(root, info) : null;
       members.push({
-        id, kind: 'workflow',
+        id, kind: 'workflow', source: 'kiro',
         name: sanitize(step.nodeId ?? step.agentName ?? 'agent', 30),
         group: wf,
         status: done ? 'done' : 'working',
         room: peek?.room ?? null,
         ...(done ? { mode: 'done' as const, since: Date.now() } : peek?.state ?? { since: Date.now() }),
+      });
+    }
+  }
+
+  // 1b) Claude Code sub-agents (Task/Agent calls) of the active session
+  if (active?.source === 'claude') {
+    const lines = await readTail(messagesPath(root, active), tailBytes(active));
+    for (const sub of pendingSubagents(lines ?? [])) {
+      if (sub.done && Date.now() - sub.since > DONE_LINGER_MS) continue;
+      members.push({
+        id: `${active.sessionId}:${sub.id}`, kind: 'workflow', source: 'claude',
+        name: sub.name, group: sub.description,
+        status: sub.done ? 'done' : 'working',
+        room: SUBAGENT_ROOM[sub.name] ?? 'research',
+        mode: sub.done ? 'done' : 'action', detail: sub.description, since: sub.since,
       });
     }
   }
@@ -144,11 +171,11 @@ export async function computeCrew(root: string, sessions: SessionInfo[], activeS
     taken.add(s.sessionId);
     if (!working) {
       idle++;
-      members.push({ id: s.sessionId, kind: 'session', name: s.name, status: 'idle', room: null, since: s.lastActivity });
+      members.push({ id: s.sessionId, kind: 'session', source: s.source, name: s.name, status: 'idle', room: null, since: s.lastActivity });
       continue;
     }
     const peek = await peekSession(root, s);
-    members.push({ id: s.sessionId, kind: 'session', name: s.name, status: 'working', room: peek?.room ?? null, ...(peek?.state ?? { since: s.lastActivity }) });
+    members.push({ id: s.sessionId, kind: 'session', source: s.source, name: s.name, status: 'working', room: peek?.room ?? null, ...(peek?.state ?? { since: s.lastActivity }) });
   }
   return members;
 }
