@@ -14,7 +14,7 @@
           <span class="brand-title">Jia's Office</span>
         </div>
         <div class="session-name" id="session-name" hidden></div>
-        <div class="status" id="stat-chips">
+        <div class="status" id="status">
           <span class="status-dot" id="status-dot"></span>
           <span class="status-text" id="status-text">—</span>
           <span class="status-session" id="status-session"></span>
@@ -28,6 +28,7 @@
         <div class="panel-head">
           <h2>층별 안내</h2>
           <span class="panel-sub">FLOOR GUIDE</span>
+          <button id="guide-toggle" class="panel-toggle" aria-label="층별 안내 접기">«</button>
         </div>
         <label class="follow-toggle">
           <input type="checkbox" id="auto-follow" checked />
@@ -49,6 +50,18 @@
         <div class="panel-head">
           <h2>활동 로그</h2>
           <span class="panel-sub">ACTIVITY LOG</span>
+        </div>
+        <div class="activity-controls">
+          <div class="chip-bar" id="chip-bar">
+            <button class="chip chip-all active" data-chip="all">전체</button>
+            <button class="chip" data-cat="read">읽기</button>
+            <button class="chip" data-cat="write">작성</button>
+            <button class="chip" data-cat="run">실행</button>
+            <button class="chip" data-cat="test">테스트</button>
+            <button class="chip" data-cat="web">웹</button>
+            <button class="chip" data-cat="plan">계획</button>
+          </div>
+          <input type="search" class="activity-search" id="activity-search" placeholder="검색" />
         </div>
         <ul id="activity-list" class="activity-list"></ul>
       </aside>

@@ -2,7 +2,7 @@
 // SECURITY: all log-derived strings are inserted via textContent only (never
 // innerHTML), truncated upstream by the watcher, and never eval'd.
 
-import { ROOMS, ROOM_ORDER, type RoomId } from './rooms.js';
+import { ROOMS, ROOM_ORDER, resolveRoom, type RoomId } from './rooms.js';
 import { Office3D, type BubbleInfo } from './scene3d.js';
 import { OfficeSocket, type ActivityEvent, type SessionInfo } from './socket.js';
 
@@ -15,6 +15,10 @@ const floorList = document.getElementById('floor-list')!;
 const activityList = document.getElementById('activity-list')!;
 const legendGrid = document.getElementById('legend-grid')!;
 const autoFollow = document.getElementById('auto-follow') as HTMLInputElement;
+const chipBar = document.getElementById('chip-bar')!;
+const activitySearch = document.getElementById('activity-search') as HTMLInputElement;
+const guideToggle = document.getElementById('guide-toggle')!;
+const appEl = document.getElementById('app')!;
 
 const office = new Office3D(canvas, roomLabels);
 
@@ -178,38 +182,421 @@ function renderFloors(): void {
   }
 }
 
-// ---- activity log -----------------------------------------------------------
-function addActivity(ev: ActivityEvent): void {
+// ---- activity log: category layer (pure) ------------------------------------
+// A1/D2: every log-derived string stays textContent-only (S1). The category
+// KO labels + icons are hard-coded ASCII/emoji constants here — NEVER sourced
+// from the (untrusted) payload.
+export type Category =
+  | 'read' | 'write' | 'run' | 'test' | 'commit'
+  | 'web' | 'plan' | 'approve' | 'done' | 'other';
+
+interface CategoryMeta { label: string; icon: string; }
+const CATEGORY: Record<Category, CategoryMeta> = {
+  read:    { label: '읽기',   icon: '👀' },
+  write:   { label: '작성',   icon: '✏️' },
+  run:     { label: '실행',   icon: '⌨️' },
+  test:    { label: '테스트', icon: '🧪' },
+  commit:  { label: '커밋',   icon: '🚀' },
+  web:     { label: '웹',     icon: '🌐' },
+  plan:    { label: '계획',   icon: '📝' },
+  approve: { label: '승인',   icon: '✋' },
+  done:    { label: '완료',   icon: '✅' },
+  other:   { label: '기타',   icon: '•' },
+};
+/** Count display order per design §1. */
+const CATEGORY_ORDER: Category[] = [
+  'read', 'write', 'run', 'test', 'commit', 'web', 'plan', 'approve', 'done', 'other',
+];
+
+// Tool-name → category sets (mirror of watcher roomMap TOOL_ROOM; the web keeps
+// its own copy because the watcher ships rooms, not categories).
+const READ_TOOLS = new Set(['read_file', 'read_code', 'grep_search', 'file_search', 'list_directory']);
+const WRITE_TOOLS = new Set(['str_replace', 'fs_write', 'fs_append', 'semantic_rename', 'smart_relocate', 'create_artifact']);
+const RUN_TOOLS = new Set(['execute_bash', 'control_bash_process', 'get_process_output']);
+const WEB_TOOLS = new Set(['remote_web_search', 'web_fetch']);
+const PLAN_TOOLS = new Set(['run_workflow', 'update_workflow', 'inspect_workflow', 'validate_workflow', 'send_message', 'todo_list', 'update_session_information']);
+
+/** Category for a tool name alone (no room/tag context). undefined = unknown. */
+function categoryForTool(tool: string): Category | undefined {
+  if (READ_TOOLS.has(tool)) return 'read';
+  if (WRITE_TOOLS.has(tool)) return 'write';
+  if (RUN_TOOLS.has(tool)) return 'run';
+  if (WEB_TOOLS.has(tool)) return 'web';
+  if (PLAN_TOOLS.has(tool)) return 'plan';
+  return undefined;
+}
+
+/** D2 §1 precedence. Pure — depends only on the event (+ paired-call recovery
+    handled by the caller via a pre-recovered tool name). */
+export function categoryOf(ev: ActivityEvent): Category {
+  const r = ev.room ? resolveRoom(ev.room) : null;
+  switch (ev.kind) {
+    case 'turn_end':
+      return 'done';
+    case 'pending_interaction':
+    case 'interaction_resolved':
+      return 'approve';
+  }
+  // tag wins over tool-name/room for tool events
+  if (ev.tag === 'test') return 'test';
+  if (ev.tag === 'commit') return 'commit';
+  if (ev.kind === 'tool_call' || ev.kind === 'tool_result') {
+    const tool = ev.tool;
+    // spec-room guard: a write-ish tool fired in the meeting room is planning
+    if (r === 'meeting' && tool && WRITE_TOOLS.has(tool)) return 'plan';
+    if (tool) {
+      const byTool = categoryForTool(tool);
+      if (byTool) return byTool;
+    }
+    // room fallback when the tool name is unknown/absent
+    return roomCategory(r);
+  }
+  if (ev.kind === 'assistant') {
+    return ev.label === 'thinking' ? 'plan' : 'other';
+  }
+  return roomCategory(r);
+}
+
+/** Room → category fallback switch (design §1). */
+function roomCategory(r: RoomId | null): Category {
+  switch (r) {
+    case 'archive': return 'read';
+    case 'dev': return 'write';
+    case 'server': return 'run';
+    case 'test': return 'test';
+    case 'research': return 'web';
+    case 'meeting': return 'plan';
+    case 'founder': return 'approve';
+    default: return 'other'; // corridor / lobby / null
+  }
+}
+
+// ---- activity log: pure model (C1/C2/D6/D7) ---------------------------------
+type RowStatus = 'pending' | 'ok' | 'fail' | 'none';
+interface LogRow {
+  key: string;
+  ev: ActivityEvent;
+  category: Category;
+  status: RowStatus;
+  resultTs?: number;
+}
+interface TurnBlock {
+  id: string;
+  startTs: number;
+  endTs?: number;
+  open: boolean;
+  rows: LogRow[];
+  counts: Partial<Record<Category, number>>;
+}
+
+let blocks: TurnBlock[] = [];               // newest-first
+const pairIndex = new Map<string, LogRow>(); // callId → pending row (cap 256, FIFO)
+const toggled = new Set<string>();           // block ids the user manually flipped (session-only)
+const PAIR_CAP = 256;
+const ROW_CAP = 200;
+
+function pairIndexSet(callId: string, row: LogRow): void {
+  pairIndex.set(callId, row);
+  while (pairIndex.size > PAIR_CAP) {
+    const oldest = pairIndex.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    pairIndex.delete(oldest);
+  }
+}
+
+let blockSeq = 0;
+function currentOpenBlock(): TurnBlock | undefined {
+  // the newest block, if it is open
+  const b = blocks[0];
+  return b && b.open ? b : undefined;
+}
+
+/** Route one event into the pure block model. DOM-free. */
+function applyEvent(ev: ActivityEvent): void {
+  if (ev.kind === 'turn_start') {
+    for (const b of blocks) b.open = false;
+    blocks.unshift({ id: `turn:${blockSeq++}`, startTs: ev.ts, open: true, rows: [], counts: {} });
+    return;
+  }
+  if (ev.kind === 'turn_end') {
+    const open = currentOpenBlock();
+    if (open) {
+      open.endTs = ev.ts;
+      open.open = false;
+      open.counts.done = (open.counts.done ?? 0) + 1;
+    }
+    return;
+  }
+
+  // a work event: find the open block or spin up a loose (ungrouped) block
+  let block = currentOpenBlock();
+  if (!block) {
+    block = { id: `loose:${blockSeq++}`, startTs: ev.ts, open: true, rows: [], counts: {} };
+    blocks.unshift(block);
+  }
+
+  const category = categoryOf(ev);
+
+  // pairing: tool_result closes a pending tool_call row in place
+  if (ev.kind === 'tool_result' && ev.callId) {
+    const pending = pairIndex.get(ev.callId);
+    if (pending) {
+      pending.status = ev.ok === false ? 'fail' : 'ok';
+      pending.resultTs = ev.ts;
+      // tool recovery: adopt the result's tool name if the call had none
+      if (!pending.ev.tool && ev.tool) pending.ev.tool = ev.tool;
+      // carry the result's tag onto the paired row (test/commit emphasis)
+      if (ev.tag && !pending.ev.tag) pending.ev.tag = ev.tag;
+      pairIndex.delete(ev.callId);
+      return; // do NOT re-count or add a new row
+    }
+    // orphan result: fall through to a standalone row
+  }
+
+  const status: RowStatus =
+    ev.kind === 'tool_call' ? 'pending'
+    : ev.kind === 'tool_result' ? (ev.ok === false ? 'fail' : 'ok')
+    : 'none';
+
+  const row: LogRow = { key: `${ev.seq}:${ev.ts}`, ev, category, status };
+  block.rows.push(row);
+  block.counts[category] = (block.counts[category] ?? 0) + 1;
+
+  if (ev.kind === 'tool_call' && ev.callId) pairIndexSet(ev.callId, row);
+
+  enforceRowCap();
+}
+
+/** D7: keep the whole model under ROW_CAP rows. Drop oldest rows first, then
+    emptied trailing blocks. Walk oldest-first (end of the newest-first array). */
+function enforceRowCap(): void {
+  let total = 0;
+  for (const b of blocks) total += b.rows.length;
+  while (total > ROW_CAP && blocks.length) {
+    const oldest = blocks[blocks.length - 1];
+    if (oldest.rows.length) {
+      oldest.rows.shift();
+      total--;
+    }
+    // drop an emptied trailing block unless it is the live open block
+    if (oldest.rows.length === 0 && oldest !== currentOpenBlock()) {
+      blocks.pop();
+    }
+  }
+}
+
+function fmtDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}시간 ${m}분`;
+  if (m > 0) return `${m}분 ${s}초`;
+  return `${s}초`;
+}
+
+/** A block's effective expanded state. A manual toggle flips the default
+    (open blocks default expanded, closed blocks default collapsed). */
+function isExpanded(b: TurnBlock): boolean {
+  return toggled.has(b.id) ? !b.open : b.open;
+}
+
+// ---- activity log: filter + search (B1-B4) ----------------------------------
+interface LogFilter { cats: Set<Category>; q: string; }
+const filter: LogFilter = { cats: new Set(), q: '' };
+const FILTER_CATS_KEY = 'ko.activity.filter.cats';
+const FILTER_Q_KEY = 'ko.activity.filter.q';
+const GUIDE_COLLAPSED_KEY = 'ko.guide.collapsed';
+
+export function rowVisible(row: LogRow, f: LogFilter): boolean {
+  const catOk = f.cats.size === 0 || f.cats.has(row.category);
+  if (!catOk) return false;
+  if (!f.q) return true;
+  const hay = `${row.ev.label} ${row.ev.detail ?? ''} ${row.ev.tool ?? ''}`.toLowerCase();
+  return hay.includes(f.q.toLowerCase());
+}
+
+/** approve/done rows are structural — they survive category filtering so a
+    turn's outcome is never hidden by a chip selection. */
+function isStructural(row: LogRow): boolean {
+  return row.category === 'approve' || row.category === 'done';
+}
+function rowVisibleStructural(row: LogRow, f: LogFilter): boolean {
+  if (isStructural(row)) {
+    if (!f.q) return true;
+    const hay = `${row.ev.label} ${row.ev.detail ?? ''} ${row.ev.tool ?? ''}`.toLowerCase();
+    return hay.includes(f.q.toLowerCase());
+  }
+  return rowVisible(row, f);
+}
+
+function loadFilter(): void {
+  try {
+    const rawCats = localStorage.getItem(FILTER_CATS_KEY);
+    if (rawCats) {
+      const arr = JSON.parse(rawCats) as unknown;
+      if (Array.isArray(arr)) {
+        for (const c of arr) if (typeof c === 'string' && c in CATEGORY) filter.cats.add(c as Category);
+      }
+    }
+    const rawQ = localStorage.getItem(FILTER_Q_KEY);
+    if (typeof rawQ === 'string') filter.q = rawQ;
+  } catch { /* ignore malformed storage */ }
+}
+function persistFilterCats(): void {
+  try { localStorage.setItem(FILTER_CATS_KEY, JSON.stringify([...filter.cats])); } catch { /* noop */ }
+}
+function persistFilterQ(): void {
+  try { localStorage.setItem(FILTER_Q_KEY, filter.q); } catch { /* noop */ }
+}
+
+// ---- activity log: rendering (C1/C2/D1-D7/B-render) --------------------------
+function roomLabelFor(ev: ActivityEvent): string {
+  if (!ev.room) return '';
+  const r = resolveRoom(ev.room);
+  return r ? ROOMS[r].label : '';
+}
+
+function buildRow(row: LogRow): HTMLLIElement {
+  const ev = row.ev;
   const li = document.createElement('li');
-  li.className = 'activity-item' + (ev.room === 'po' ? ' po' : '');
-  const time = document.createElement('span');
-  time.className = 'activity-time';
-  time.textContent = new Date(ev.ts).toLocaleTimeString('ko-KR', { hour12: false });
-  const body = document.createElement('div');
-  body.className = 'activity-body';
-  if (ev.room) {
-    const room = document.createElement('span');
-    room.className = 'activity-room';
-    room.textContent = `[${ev.room}]`;
-    body.append(room);
-  }
+  li.className = 'activity-row';
+  if (row.status === 'fail') li.classList.add('fail');
+  if (row.category === 'approve') li.classList.add('approve');
+
+  // color bar — keyed by RAW room id (not resolved), transparent when unknown
+  const bar = document.createElement('span');
+  bar.className = 'row-bar';
+  bar.style.background = LEGEND_SWATCH[ev.room as RoomId] ?? 'transparent';
+
+  const icon = document.createElement('span');
+  icon.className = 'row-icon';
+  icon.textContent = CATEGORY[row.category].icon;
+
   const label = document.createElement('span');
-  label.className = 'activity-label';
-  // Prefer the richer speech-bubble text so the log matches what the cat "said":
-  // detail (e.g. a tool title / assistant line) > question > plain label.
+  label.className = 'row-label';
   const main = ev.detail || ev.label;
-  label.textContent = ev.question ? `${main}: ${ev.question}` : main; // untrusted
-  body.append(label);
-  // the tool name as a subtle trailing tag, when present and not already shown
-  if (ev.tool && ev.tool !== main) {
-    const tool = document.createElement('span');
-    tool.className = 'activity-tool';
-    tool.textContent = ev.tool;
-    body.append(tool);
+  const text = ev.question ? `${main}: ${ev.question}` : main;
+  label.textContent = text; // untrusted → textContent
+  const roomName = roomLabelFor(ev);
+  if (roomName) {
+    const target = document.createElement('span');
+    target.className = 'row-target';
+    target.textContent = roomName;
+    label.append(' ', target);
   }
-  li.append(time, body);
-  activityList.prepend(li); // newest first
-  while (activityList.children.length > 200) activityList.lastChild?.remove();
+
+  const meta = document.createElement('span');
+  meta.className = 'row-meta';
+  const whenTs = row.resultTs ?? ev.ts;
+  meta.textContent = relativeTime(whenTs);
+  meta.title = new Date(whenTs).toLocaleString('ko-KR', { hour12: false });
+  if (row.status === 'ok') {
+    const mark = document.createElement('span');
+    mark.className = 'row-outcome ok';
+    mark.textContent = '✅';
+    meta.append(' ', mark);
+  } else if (row.status === 'fail') {
+    const mark = document.createElement('span');
+    mark.className = 'row-outcome fail';
+    mark.textContent = '❌';
+    meta.append(' ', mark);
+  } else if (row.status === 'pending') {
+    const mark = document.createElement('span');
+    mark.className = 'row-outcome pending';
+    mark.textContent = '…';
+    meta.append(' ', mark);
+  }
+
+  li.append(bar, icon, label, meta);
+  return li;
+}
+
+function blockCountSummary(b: TurnBlock): string {
+  const parts: string[] = [];
+  for (const cat of CATEGORY_ORDER) {
+    if (cat === 'done' || cat === 'other') continue; // omit from the summary
+    const n = b.counts[cat];
+    if (n) parts.push(`${CATEGORY[cat].icon} ${n}`);
+  }
+  return parts.join(' · ');
+}
+
+function blockDurationText(b: TurnBlock): string {
+  if (b.open) return '진행 중 · …';
+  if (b.endTs != null) return fmtDuration(b.endTs - b.startTs);
+  const last = b.rows.at(-1);
+  const end = last ? (last.resultTs ?? last.ev.ts) : b.startTs;
+  return fmtDuration(end - b.startTs);
+}
+
+function buildBlockHeader(b: TurnBlock, expanded: boolean): HTMLDivElement {
+  const head = document.createElement('div');
+  head.className = 'block-head';
+  head.dataset.blockId = b.id;
+
+  const caret = document.createElement('span');
+  caret.className = 'block-caret';
+  caret.textContent = expanded ? '▾' : '▸';
+
+  const start = document.createElement('span');
+  start.className = 'block-time';
+  start.textContent = new Date(b.startTs).toLocaleTimeString('ko-KR', { hour12: false }).slice(0, 5);
+
+  const counts = document.createElement('span');
+  counts.className = 'block-counts';
+  counts.textContent = blockCountSummary(b);
+
+  const dur = document.createElement('span');
+  dur.className = 'block-dur';
+  dur.textContent = blockDurationText(b);
+
+  head.append(caret, start, counts, dur);
+  head.addEventListener('click', () => {
+    if (toggled.has(b.id)) toggled.delete(b.id); else toggled.add(b.id);
+    renderLog();
+  });
+  return head;
+}
+
+function renderLog(): void {
+  activityList.textContent = '';
+  for (const b of blocks) {
+    const isLoose = b.id.startsWith('loose:');
+    // collect the visible rows for this block
+    const visible = b.rows.filter((row) => rowVisibleStructural(row, filter));
+    if (visible.length === 0 && !isLoose) continue; // skip empty blocks (grouped)
+    if (visible.length === 0 && isLoose) continue;
+
+    const li = document.createElement('li');
+    li.className = 'activity-block' + (isLoose ? ' loose' : '');
+
+    if (!isLoose) {
+      const expanded = isExpanded(b);
+      li.append(buildBlockHeader(b, expanded));
+      if (expanded) {
+        const rowsUl = document.createElement('ul');
+        rowsUl.className = 'block-rows';
+        for (const row of visible) rowsUl.append(buildRow(row));
+        li.append(rowsUl);
+      }
+    } else {
+      // loose blocks: header-less, always expanded (flat-list parity)
+      const rowsUl = document.createElement('ul');
+      rowsUl.className = 'block-rows';
+      for (const row of visible) rowsUl.append(buildRow(row));
+      li.append(rowsUl);
+    }
+    activityList.append(li);
+  }
+}
+
+/** Rewrite only the open block's .block-dur text (ticked every 15s). */
+function renderOpenBlockHeader(): void {
+  const open = currentOpenBlock();
+  if (!open) return;
+  const head = activityList.querySelector(`.block-head[data-block-id="${open.id}"] .block-dur`);
+  if (head) (head as HTMLElement).textContent = blockDurationText(open);
 }
 
 function setRoom(room: string): void {
@@ -266,31 +653,6 @@ function applyBubble(ev: ActivityEvent): void {
   // classifier family. undefined = leave the current status untouched.
   const kind = statusKindFor(ev);
   if (kind !== undefined) currentStatus = kind;
-  // Also persist the bubble line into the activity log so thoughts/状態 don't
-  // vanish — but skip events addActivity already logs verbatim (tool_call/user)
-  // and collapse repeats (e.g. continuous "고민 중").
-  if (next && next.mode !== 'action') logBubble(next.icon, next.title, next.sub);
-}
-
-let lastBubbleLog = '';
-function logBubble(icon: string, title: string, sub?: string): void {
-  const key = `${title}|${sub ?? ''}`;
-  if (key === lastBubbleLog) return; // collapse consecutive duplicates
-  lastBubbleLog = key;
-  const li = document.createElement('li');
-  li.className = 'activity-item bubble-line';
-  const time = document.createElement('span');
-  time.className = 'activity-time';
-  time.textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-  const body = document.createElement('div');
-  body.className = 'activity-body';
-  const label = document.createElement('span');
-  label.className = 'activity-label';
-  label.textContent = `${icon} ${sub ? `${title} — ${sub}` : title}`; // untrusted → textContent
-  body.append(label);
-  li.append(time, body);
-  activityList.prepend(li);
-  while (activityList.children.length > 200) activityList.lastChild?.remove();
 }
 
 /** Live-only reactions: confetti, sweat, LED flashes, and the boss cat's approvals. */
@@ -323,8 +685,11 @@ const socket = new OfficeSocket({
     sessions = f.sessions;
     liveSessionId = f.liveSessionId;
     activeSessionId = f.sessionId;
-    activityList.textContent = '';
-    for (const ev of f.events) { addActivity(ev); }
+    // rebuild the pure model from the catch-up history, then render once
+    blocks = [];
+    pairIndex.clear();
+    for (const ev of f.events) applyEvent(ev);
+    renderLog();
     const active = sessions.find((s) => s.sessionId === activeSessionId);
     sessionNameEl.textContent = active ? active.name : '세션';
     office.setAgentName(active ? `에이전트냥 · ${active.name}` : '에이전트냥');
@@ -348,7 +713,8 @@ const socket = new OfficeSocket({
   },
   onEvent: (f) => {
     noteActivity(f.event); // wakes a napping agent first
-    addActivity(f.event);
+    applyEvent(f.event);
+    renderLog();
     applyBubble(f.event);
     react(f.event);
     setRoom(f.currentRoom);
@@ -373,7 +739,66 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
+// ---- activity controls + guide toggle wiring --------------------------------
+function syncChipUI(): void {
+  for (const el of Array.from(chipBar.children) as HTMLElement[]) {
+    if (el.dataset.chip === 'all') {
+      el.classList.toggle('active', filter.cats.size === 0);
+    } else if (el.dataset.cat) {
+      el.classList.toggle('active', filter.cats.has(el.dataset.cat as Category));
+    }
+  }
+}
+function wireControls(): void {
+  chipBar.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('.chip') as HTMLElement | null;
+    if (!btn) return;
+    if (btn.dataset.chip === 'all') {
+      filter.cats.clear();
+    } else if (btn.dataset.cat) {
+      const cat = btn.dataset.cat as Category;
+      if (filter.cats.has(cat)) filter.cats.delete(cat); else filter.cats.add(cat);
+    }
+    persistFilterCats();
+    syncChipUI();
+    renderLog();
+  });
+
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  activitySearch.addEventListener('input', () => {
+    filter.q = activitySearch.value;
+    renderLog(); // instant visual response
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(persistFilterQ, 200); // debounce persistence
+  });
+
+  guideToggle.addEventListener('click', () => {
+    const collapsed = appEl.classList.toggle('guide-collapsed');
+    try { localStorage.setItem(GUIDE_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* noop */ }
+    guideToggle.textContent = collapsed ? '»' : '«';
+    guideToggle.setAttribute('aria-label', collapsed ? '층별 안내 펼치기' : '층별 안내 접기');
+    // the 3D canvas must re-measure after the grid column animates
+    const onEnd = (): void => { office.resize(); appEl.removeEventListener('transitionend', onEnd); };
+    appEl.addEventListener('transitionend', onEnd);
+    setTimeout(() => office.resize(), 240);
+  });
+}
+
+// restore persisted filter + collapsed state BEFORE the first paint
+loadFilter();
+activitySearch.value = filter.q;
+syncChipUI();
+try {
+  if (localStorage.getItem(GUIDE_COLLAPSED_KEY) === '1') {
+    appEl.classList.add('guide-collapsed');
+    guideToggle.textContent = '»';
+    guideToggle.setAttribute('aria-label', '층별 안내 펼치기');
+  }
+} catch { /* noop */ }
+wireControls();
+
 buildLegend();
 socket.connect();
 requestAnimationFrame(frame);
 setInterval(renderFloors, 15000);
+setInterval(renderOpenBlockHeader, 15000);

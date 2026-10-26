@@ -50,13 +50,20 @@ body {
 
 #app {
   display: grid;
-  grid-template-columns: 260px 1fr 300px;
+  grid-template-columns: 260px 1fr 360px;
   grid-template-rows: 52px 1fr;
   grid-template-areas:
     "top top top"
     "left stage right";
   height: 100vh;
+  transition: grid-template-columns .22s ease;
 }
+#app.guide-collapsed { grid-template-columns: 44px 1fr 360px; }
+#app.guide-collapsed #floor-guide .panel-sub,
+#app.guide-collapsed #floor-guide h2,
+#app.guide-collapsed #floor-guide .follow-toggle,
+#app.guide-collapsed #floor-guide .floor-list { display: none; }
+#app.guide-collapsed #floor-guide .panel-head { padding: 14px 8px 10px; justify-content: center; }
 
 /* ---- top bar ---- */
 #topbar {
@@ -144,6 +151,20 @@ body {
 }
 .panel-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .panel-sub { font-size: 10px; letter-spacing: 1px; color: hsl(var(--faint)); }
+.panel-toggle {
+  margin-left: auto;
+  align-self: center;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--panel-2));
+  color: hsl(var(--muted));
+  border-radius: 6px;
+  font-size: 13px; line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+.panel-toggle:hover { color: hsl(var(--ink)); border-color: hsl(var(--faint)); }
 
 .follow-toggle {
   display: flex; align-items: center; gap: 8px;
@@ -188,37 +209,105 @@ body {
   flex: none;
 }
 
-/* ---- activity log ---- */
-.activity-item {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px;
-  padding: 7px 8px;
+/* ---- activity log: filter controls (pinned under the panel head) ---- */
+.activity-controls {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+}
+.chip-bar { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip {
+  font: inherit; font-size: 11px; line-height: 1;
+  padding: 5px 9px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--panel));
+  color: hsl(var(--muted));
+  border-radius: 999px;
+  cursor: pointer;
+}
+.chip:hover { border-color: hsl(var(--faint)); color: hsl(var(--fg)); }
+/* active chip = ink text + panel-2 fill + border — NEVER the signature green */
+.chip.active {
+  color: hsl(var(--ink));
+  background: hsl(var(--panel-2));
+  border-color: hsl(var(--faint));
+  font-weight: 600;
+}
+.activity-search {
+  font: inherit; font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--panel));
+  color: hsl(var(--fg));
+  width: 100%;
+}
+.activity-search::placeholder { color: hsl(var(--faint)); }
+.activity-search:focus { outline: none; border-color: hsl(var(--faint)); }
+
+/* ---- activity log: blocks + rows ---- */
+.activity-list { padding: 4px 8px 16px; }
+.activity-block {
+  list-style: none;
   border-bottom: 1px solid hsl(var(--border) / 0.5);
+  padding: 2px 0;
+}
+.activity-block.loose { border-bottom: none; }
+
+.block-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 6px;
+  cursor: pointer;
+  border-radius: 7px;
+}
+.block-head:hover { background: hsl(var(--panel-2)); }
+.block-caret { color: hsl(var(--faint)); font-size: 10px; width: 10px; flex: none; }
+.block-time {
+  color: hsl(var(--muted)); font-variant-numeric: tabular-nums;
+  font-size: 11px; flex: none;
+}
+.block-counts {
+  flex: 1; min-width: 0;
+  font-size: 11px; color: hsl(var(--fg));
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.block-dur {
+  flex: none; font-size: 10px; color: hsl(var(--faint));
+  font-variant-numeric: tabular-nums;
+}
+
+.block-rows { list-style: none; margin: 0; padding: 0 0 4px; }
+.activity-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 6px 8px;
+  align-items: baseline;
+  padding: 5px 6px 5px 4px;
   font-size: 12px;
 }
-.activity-time {
-  color: hsl(var(--faint));
-  font-variant-numeric: tabular-nums;
-  font-size: 10px;
+.row-bar {
+  width: 3px; align-self: stretch; border-radius: 2px;
+  background: transparent;
 }
-.activity-body { min-width: 0; }
-.activity-room {
-  display: inline-block;
-  font-size: 10px; letter-spacing: 0.3px;
-  color: hsl(var(--muted));
-  margin-right: 6px;
+.row-icon { font-size: 11px; flex: none; }
+.row-label {
+  min-width: 0;
+  color: hsl(var(--fg));
+  overflow: hidden; text-overflow: ellipsis; word-break: keep-all;
+  white-space: nowrap;
 }
-.activity-label { color: hsl(var(--fg)); }
-.activity-item.po .activity-room { color: hsl(var(--green)); }
-/* trailing tool-name tag on a logged action */
-.activity-tool {
-  margin-left: 6px;
-  font-size: 10px; font-variant-numeric: tabular-nums;
-  color: hsl(var(--faint, var(--muted)));
+.row-target { color: hsl(var(--muted)); font-size: 11px; }
+.row-meta {
+  flex: none;
+  color: hsl(var(--faint)); font-variant-numeric: tabular-nums;
+  font-size: 10px; white-space: nowrap;
 }
-/* bubble-sourced log lines (thoughts, waiting, done) read a touch softer */
-.activity-item.bubble-line .activity-label { color: hsl(var(--muted)); }
+.row-outcome.pending { color: hsl(var(--faint)); }
+
+/* emphasis — fail is red, approve is amber; success stays neutral ink (never green) */
+.activity-row.fail .row-bar { background: hsl(2 60% 52%); }
+.activity-row.fail .row-label { color: hsl(2 55% 44%); }
+.activity-row.approve .row-bar { background: hsl(24 85% 62%); }
 
 /* ---- stage ---- */
 #stage-wrap {
@@ -325,17 +414,24 @@ body {
 
 .cat-tag {
   white-space: nowrap;
+  display: inline-flex; flex-direction: column; align-items: flex-start;
   font-size: 10.5px; font-weight: 700;
   color: hsl(220 14% 26%);
   background: hsl(210 24% 99% / 0.95);
   border: 1px solid hsl(214 12% 84%);
-  border-radius: 999px;
-  padding: 2px 8px 2px 6px;
+  border-radius: 10px;
+  padding: 2px 8px 3px 6px;
   box-shadow: 0 2px 6px rgba(20, 30, 50, .1);
 }
-.cat-tag::before {
+.cat-tag-name::before {
   content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
   background: hsl(152 55% 45%); margin-right: 5px; vertical-align: 1px;
+}
+/* role / workflow line under the name (sub-agent cats) */
+.cat-tag-role {
+  margin-left: 11px; /* align under the name, past the status dot */
+  font-size: 8.5px; font-weight: 600; letter-spacing: 0.2px;
+  color: hsl(220 8% 52%);
 }
 
 /* founder nameplate — premium, readable, black-accent */
