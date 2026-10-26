@@ -187,6 +187,7 @@ export class Office3D {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera: THREE.OrthographicCamera;
   private composer!: EffectComposer;
+  private aoPass: { enabled: boolean } | null = null;
   private readonly models = new ModelLoader();
 
   private character!: THREE.Group;
@@ -1594,6 +1595,13 @@ export class Office3D {
     this.renderer.domElement.parentElement!.appendChild(c);
   }
 
+  /** Power save: 1x pixel ratio and no ambient occlusion (the two heaviest GPU costs). */
+  setPowerSave(on: boolean): void {
+    this.renderer.setPixelRatio(on ? 1 : Math.min(2, window.devicePixelRatio || 1));
+    if (this.aoPass) this.aoPass.enabled = !on;
+    this.resize();
+  }
+
   // ---- postprocessing -----------------------------------------------------------
   private setupComposer(): void {
     this.composer = new EffectComposer(this.renderer);
@@ -1607,6 +1615,7 @@ export class Office3D {
       cfg.color = new THREE.Color(PALETTE.aoColor);
       // n8ao's Pass extends three's addon Pass; the pmndrs composer accepts it at runtime.
       this.composer.addPass(n8 as unknown as Parameters<EffectComposer['addPass']>[0]);
+      this.aoPass = n8 as unknown as { enabled: boolean };
     } catch (e) {
       console.warn('[postprocessing] N8AOPostPass unavailable — AO skipped:', e);
     }
@@ -2817,7 +2826,8 @@ export class Office3D {
   private tmp = new THREE.Vector3();
 
   render(now: number): void {
-    const dt = Math.max(0, Math.min(0.05, this.lastNow ? (now - this.lastNow) / 1000 : 0));
+    // capped so a long pause (hidden tab) never jumps; 0.12 s still covers the 10fps idle tier
+    const dt = Math.max(0, Math.min(0.12, this.lastNow ? (now - this.lastNow) / 1000 : 0));
     this.lastNow = now;
     this.updateFollow(dt, now);
     if (Math.abs(this.zoomTarget - this.zoom) > 0.001) {

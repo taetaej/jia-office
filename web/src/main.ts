@@ -407,10 +407,75 @@ const socket = new OfficeSocket({
 // ---- render loop ------------------------------------------------------------
 window.addEventListener('resize', () => office.resize());
 
+// 3D power: 자동 picks a frame rate from what's going on (see targetFps);
+// 켜기 = always 60fps; 절전 = 30fps without AO at 1x pixels; 끄기 = the loop
+// stops (socket, activity log and alerts keep running).
+type Power = 'auto' | 'on' | 'eco' | 'off';
+const POWER_KEY = 'ko.power';
+const powerToggle = document.getElementById('power-toggle')!;
+const powerOverlay = document.getElementById('power-overlay')!;
+let power: Power = 'auto';
+let eco = false; // what the scene is actually running at right now
+let looping = false;
+let lastDraw = 0;
+
+/** Frames per second the office needs right now. Below 60 also drops AO and
+    retina pixels. In 자동: 60 while a cat works (or a sign-off waits) and the
+    window is in front, 20 while idle in front, 10 when nobody's looking. */
+function targetFps(): number {
+  if (power === 'on') return 60;
+  if (power === 'eco') return 30;
+  if (document.hidden || !document.hasFocus()) return 10;
+  return (watchingLive() && !resting) || lastApprovals.length > 0 ? 60 : 20;
+}
+
+function applyEco(next: boolean): void {
+  if (next === eco) return;
+  eco = next;
+  office.setPowerSave(next);
+  powerToggle.dataset.eco = String(next);
+}
+
 function frame(now: number): void {
-  office.render(now);
-  highlightLegend();
-  requestAnimationFrame(frame);
+  if (power === 'off') { looping = false; return; }
+  const fps = targetFps();
+  applyEco(fps < 60);
+  if (now - lastDraw >= 1000 / fps - 2) {
+    lastDraw = now;
+    office.render(now);
+    highlightLegend();
+  }
+  // below 60fps sleep between frames instead of waking on every vsync
+  if (fps >= 60) requestAnimationFrame(frame);
+  else setTimeout(() => requestAnimationFrame(frame), Math.max(0, 1000 / fps - (performance.now() - now) - 4));
+}
+
+// dev hook: drive one loop step by hand (rAF is throttled in hidden panes)
+(window as unknown as { __power?: unknown }).__power = { step: (now: number) => frame(now), state: () => ({ power, eco, fps: targetFps() }) };
+
+function setPower(next: Power): void {
+  power = next;
+  try { localStorage.setItem(POWER_KEY, next); } catch { /* noop */ }
+  for (const b of Array.from(powerToggle.querySelectorAll<HTMLElement>('[data-power]'))) {
+    b.classList.toggle('active', b.dataset.power === next);
+  }
+  powerOverlay.hidden = next !== 'off';
+  if (next === 'on' || next === 'eco') applyEco(next === 'eco');
+  if (next !== 'off' && !looping) { looping = true; requestAnimationFrame(frame); }
+}
+
+function wirePower(): void {
+  let saved: Power = 'auto';
+  try {
+    const v = localStorage.getItem(POWER_KEY);
+    if (v === 'on' || v === 'eco' || v === 'off') saved = v;
+  } catch { /* noop */ }
+  powerToggle.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-power]');
+    if (btn) setPower(btn.dataset.power as Power);
+  });
+  document.getElementById('power-resume')!.addEventListener('click', () => setPower('auto'));
+  setPower(saved);
 }
 
 // ---- activity controls + guide toggle wiring --------------------------------
@@ -478,6 +543,6 @@ autoFollow.addEventListener('change', () => office.setFollow(autoFollow.checked)
 
 buildLegend();
 socket.connect();
-requestAnimationFrame(frame);
+wirePower();
 setInterval(renderFloors, 15000);
 setInterval(() => log.tick(), 5000); // live card: clock + thinking time

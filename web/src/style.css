@@ -508,3 +508,38 @@ body {
 }
 .alert-settings .follow-toggle input { width: 11px; height: 11px; margin: 0; }
 .alert-settings .follow-toggle:has(input:checked) { border-color: hsl(var(--green) / 0.45); color: hsl(var(--fg)); }
+
+/* ---- 3D power toggle (header) + "off" overlay ---- */
+.power-toggle {
+  display: flex; align-items: center; gap: 2px;
+  padding: 2px; border: 1px solid hsl(var(--border)); border-radius: 9999px;
+  background: hsl(var(--panel-2) / 0.6);
+}
+.power-label { font-size: 10px; font-weight: 700; letter-spacing: 0.4px; color: hsl(var(--faint)); padding: 0 6px 0 8px; }
+.power-toggle button {
+  font: 600 11px/1 var(--font); color: hsl(var(--muted));
+  padding: 5px 10px; border: 0; border-radius: 9999px; background: transparent; cursor: pointer;
+}
+.power-toggle button:hover { color: hsl(var(--fg)); }
+.power-toggle button.active { background: hsl(var(--ink)); color: hsl(var(--panel)); }
+
+.power-overlay {
+  position: absolute; inset: 0; z-index: 30;
+  display: grid; place-items: center;
+  background: hsl(var(--bg) / 0.72);
+  backdrop-filter: blur(3px) grayscale(0.6);
+}
+.power-overlay[hidden] { display: none; }
+.power-card {
+  max-width: 320px; padding: 20px 22px; text-align: center;
+  background: hsl(var(--panel)); border: 1px solid hsl(var(--border)); border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(20, 30, 50, 0.12);
+}
+.power-title { font-size: 15px; font-weight: 700; color: hsl(var(--ink)); }
+.power-sub { margin: 6px 0 14px; font-size: 12px; color: hsl(var(--muted)); }
+#power-resume {
+  font: 700 12px/1 var(--font); padding: 9px 16px; border: 0; border-radius: 9999px;
+  background: hsl(var(--ink)); color: hsl(var(--panel)); cursor: pointer;
+}
+/* 자동 is running at 절전 right now: a soft hint on the active pill */
+.power-toggle[data-eco="true"] button[data-power="auto"].active { background: hsl(var(--muted)); }
