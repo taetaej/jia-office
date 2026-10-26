@@ -1404,12 +1404,23 @@ export class Office3D {
       if (!z.label) continue;
       const el = document.createElement('div');
       el.className = 'room3d-label';
-      el.textContent = z.label; // textContent only
+      // "개발실 · DEV" → a small Korean name with the English tag beside it (textContent only)
+      const [ko, en] = z.label.split(' · ');
+      const nameEl = document.createElement('span');
+      nameEl.textContent = ko;
+      el.append(nameEl);
+      if (en) {
+        const sub = document.createElement('span');
+        sub.className = 'room3d-sub';
+        sub.textContent = en;
+        el.append(sub);
+      }
       el.style.opacity = '0';
       el.style.transition = 'opacity 0.15s';
       this.labelRoot.appendChild(el);
       // Always-on room labels (user wants each room's name visible at all times).
-      this.labels.push({ zone: z.id, el, world: new THREE.Vector3(z.x + z.w / 2, 1.6, z.z + z.d / 2), hoverOnly: false });
+      // near the floor, like a floor sign, so it doesn't float over the furniture
+      this.labels.push({ zone: z.id, el, world: new THREE.Vector3(z.x + z.w / 2, 0.15, z.z + z.d / 2), hoverOnly: false });
     }
     const f = zoneById('founder')!;
     const np = document.createElement('div');
@@ -2353,7 +2364,9 @@ export class Office3D {
       this.tmp.copy(l.world).project(this.camera);
       const x = (this.tmp.x * 0.5 + 0.5) * el.clientWidth;
       const y = (-this.tmp.y * 0.5 + 0.5) * el.clientHeight;
-      l.el.style.transform = `translate(-50%,-100%) translate(${x}px,${y}px)`;
+      // room labels sit centered on their floor point; nameplates hang above theirs
+      const lift = l.el.classList.contains('room3d-label') ? '-50%' : '-100%';
+      l.el.style.transform = `translate(-50%,${lift}) translate(${x}px,${y}px)`;
       // hoverOnly labels fade with hover; always-on labels (room names) stay visible.
       l.el.style.opacity = l.hoverOnly ? (this.hoverZone === l.zone ? '1' : '0') : '1';
       // a room label right under the cat's bubble would collide with it: fade it
