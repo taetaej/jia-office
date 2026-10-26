@@ -2,7 +2,29 @@
    light wood + linen furniture, crisp black for frames/dividers/labels.
    Signature green reserved strictly for "the system is pointing here"
    (LIVE dot, active room, character). */
+
+/* ---- Paperlogy webfont (눈누, fonts-archive CDN) ---- */
+@font-face {
+  font-family: 'Paperlogy';
+  font-weight: 400;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/gh/fonts-archive/Paperlogy/Paperlogy-4Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Paperlogy';
+  font-weight: 600;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/gh/fonts-archive/Paperlogy/Paperlogy-6SemiBold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Paperlogy';
+  font-weight: 700;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/gh/fonts-archive/Paperlogy/Paperlogy-7Bold.woff2') format('woff2');
+}
+
 :root {
+  --font: 'Paperlogy', ui-sans-serif, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --bg: 210 16% 95%;
   --panel: 210 20% 98%;
   --panel-2: 210 14% 92%;
@@ -22,8 +44,7 @@ html, body { margin: 0; height: 100%; }
 body {
   background: hsl(var(--bg));
   color: hsl(var(--fg));
-  font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font: 13px/1.5 var(--font);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -191,6 +212,14 @@ body {
 }
 .activity-label { color: hsl(var(--fg)); }
 .activity-item.po .activity-room { color: hsl(var(--green)); }
+/* trailing tool-name tag on a logged action */
+.activity-tool {
+  margin-left: 6px;
+  font-size: 10px; font-variant-numeric: tabular-nums;
+  color: hsl(var(--faint, var(--muted)));
+}
+/* bubble-sourced log lines (thoughts, waiting, done) read a touch softer */
+.activity-item.bubble-line .activity-label { color: hsl(var(--muted)); }
 
 /* ---- stage ---- */
 #stage-wrap {

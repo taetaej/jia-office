@@ -177,11 +177,21 @@ function addActivity(ev: ActivityEvent): void {
   }
   const label = document.createElement('span');
   label.className = 'activity-label';
-  label.textContent = ev.question ? `${ev.label}: ${ev.question}` : ev.label; // untrusted
+  // Prefer the richer speech-bubble text so the log matches what the cat "said":
+  // detail (e.g. a tool title / assistant line) > question > plain label.
+  const main = ev.detail || ev.label;
+  label.textContent = ev.question ? `${main}: ${ev.question}` : main; // untrusted
   body.append(label);
+  // the tool name as a subtle trailing tag, when present and not already shown
+  if (ev.tool && ev.tool !== main) {
+    const tool = document.createElement('span');
+    tool.className = 'activity-tool';
+    tool.textContent = ev.tool;
+    body.append(tool);
+  }
   li.append(time, body);
   activityList.prepend(li); // newest first
-  while (activityList.children.length > 120) activityList.lastChild?.remove();
+  while (activityList.children.length > 200) activityList.lastChild?.remove();
 }
 
 function setRoom(room: string): void {
@@ -234,6 +244,31 @@ function bubbleFor(ev: ActivityEvent): BubbleInfo | null | undefined {
 function applyBubble(ev: ActivityEvent): void {
   const next = bubbleFor(ev);
   if (next !== undefined) office.showBubble(next);
+  // Also persist the bubble line into the activity log so thoughts/状態 don't
+  // vanish — but skip events addActivity already logs verbatim (tool_call/user)
+  // and collapse repeats (e.g. continuous "고민 중").
+  if (next && next.mode !== 'action') logBubble(next.icon, next.title, next.sub);
+}
+
+let lastBubbleLog = '';
+function logBubble(icon: string, title: string, sub?: string): void {
+  const key = `${title}|${sub ?? ''}`;
+  if (key === lastBubbleLog) return; // collapse consecutive duplicates
+  lastBubbleLog = key;
+  const li = document.createElement('li');
+  li.className = 'activity-item bubble-line';
+  const time = document.createElement('span');
+  time.className = 'activity-time';
+  time.textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+  const body = document.createElement('div');
+  body.className = 'activity-body';
+  const label = document.createElement('span');
+  label.className = 'activity-label';
+  label.textContent = `${icon} ${sub ? `${title} — ${sub}` : title}`; // untrusted → textContent
+  body.append(label);
+  li.append(time, body);
+  activityList.prepend(li);
+  while (activityList.children.length > 200) activityList.lastChild?.remove();
 }
 
 /** Live-only reactions: confetti, sweat, LED flashes, and the boss cat's approvals. */

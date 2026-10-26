@@ -52,6 +52,18 @@ const TOOL_ROOM: Record<string, RoomId> = {
   // research: web
   remote_web_search: 'research',
   web_fetch: 'research',
+  // meeting: planning, orchestration & coordination tools (not real "work" in a
+  // room — this is the agent organizing/delegating, which belongs in the meeting
+  // room). Keeps these out of the research-fallback bucket.
+  run_workflow: 'meeting',
+  update_workflow: 'meeting',
+  inspect_workflow: 'meeting',
+  validate_workflow: 'meeting',
+  send_message: 'meeting',
+  todo_list: 'meeting',
+  update_session_information: 'meeting',
+  // dev: authoring an artifact/document is producing output → dev room
+  create_artifact: 'dev',
 };
 
 /** Tools whose shell args, when they mention these, mean a TEST run (beats server). */
