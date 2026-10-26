@@ -1,0 +1,7 @@
+{
+  "task_id": "task-activity-log-rebuild",
+  "task_description": "Rebuild the activity log (filtering, grouping into collapsible turn-blocks, call/result pairing, readability) and two layout changes (collapsible FLOOR GUIDE, 360px log), plus enrich watcher tool_result events with tool identity/label/tag/callId. Implements web/.agents/tasks/design.md (APPROVED) and requirements.md. FEAT-001 (watcher shared contract) must land before FEAT-002 (web rebuild) because the web side depends on tool_result field semantics.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

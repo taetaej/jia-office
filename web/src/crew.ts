@@ -73,6 +73,10 @@ export class Hud {
     this.tagRole.style.display = role ? '' : 'none';
   }
   setTagVisible(on: boolean): void { this.tag.style.display = on ? '' : 'none'; }
+  /** Dial up the agent's waiting bubble into the big pulsing ❗ (pure CSS). */
+  setEmphasis(on: boolean): void { if (on) this.el.dataset.emph = '1'; else delete this.el.dataset.emph; }
+  /** Grow/pulse the secretary's alert bubble once the wait drags on (pure CSS). */
+  setEscalated(on: boolean): void { if (on) this.el.dataset.esc = '1'; else delete this.el.dataset.esc; }
 
   /** Expire timed bubbles and tick the thinking counter. */
   update(): void {

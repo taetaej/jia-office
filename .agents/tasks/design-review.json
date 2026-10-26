@@ -1,0 +1,38 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "NIT",
+      "title": "Label-dodge exception rationale is mechanically inaccurate (fix is still correct)",
+      "location": "design.md §2.3",
+      "problem": "The exception is justified by 'the secretary's own alert bubble sits over the 비서실 tag', but the label-dodge loop runs in render() BEFORE renderExtras() repopulates this.hudSpots, so during the loop hudSpots holds only the agent's spot, never the secretary's own. The tag would dodge the agent bubble, not its own.",
+      "fix": "Keep the one-token change (&& l.zone !== 'secretary') but correct the rationale: the loop only sees the agent HUD spot, so the exception keeps the 비서실 tag legible when the agent's waiting bubble overlaps it, mirroring the founder special-case."
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "title": "Glasses parented to head, but cited boss crown/bow pattern parents to cat",
+      "location": "design.md §2.2",
+      "problem": "scene3d.ts bossCat case (~1066-1079) adds the crown/bow via cat.add(...), i.e. parented to the cat group, not head. 'Exactly like the boss crown/bow pattern' overstates the parallel. The head-local coordinate derivation (±0.055, 0.145, 0.16 for eyes; glasses at z 0.19) is verified correct.",
+      "fix": "Reword to 'small accessory meshes parented to the head group (not cat like the boss crown/bow) so they track blinks/head-tilt.' No geometry change."
+    },
+    {
+      "id": 3,
+      "severity": "NIT",
+      "title": "Pin the escalation-deadline clock to performance.now(), not Date.now()",
+      "location": "design.md §3.1a / §3.2 / §3.6",
+      "problem": "secretaryEscalateAt/secretaryUntil use performance.now(); updateSecretary(now) must compare against the rAF timestamp (performance.now based), not Date.now() which is used for HUD 'since'. Mixing the two clocks is an easy coder slip and is not stated.",
+      "fix": "Add a line: secretaryEscalateAt/secretaryUntil are performance.now() values and must be compared against updateSecretary's rAF 'now'; HUD 'since' stays Date.now()."
+    },
+    {
+      "id": 4,
+      "severity": "NIT",
+      "title": "FLOOR.center stays (14,10) after widening — note composition shift explicitly",
+      "location": "design.md §1.1 / §7",
+      "problem": "FLOOR.center is a hardcoded {x:14,z:10} used for camera eye/lookAt; it is not recomputed from maxX. The orthographic fit in resize() DOES project up to FLOOR.maxX so the x28-31 strip is guaranteed in-frame, but §7 frames this as a possible crop. It will not crop; the composition only shifts east.",
+      "fix": "Update §7: the fit already includes FLOOR.maxX so no crop; only the composition shifts. Optionally bump FLOOR.center.x to ~15 if balance reads poorly. No required code change; eyeball verify.mjs."
+    }
+  ],
+  "reviewDoc": "/Users/shinjia/Project/kiro-office/.agents/tasks/design-review.md"
+}

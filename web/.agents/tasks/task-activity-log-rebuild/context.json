@@ -1,0 +1,27 @@
+{
+  "project_type": "Local-only Kiro session-log viewer. npm workspaces monorepo: watcher/ (Node+TS, tails ~/.kiro/sessions messages.jsonl, serves WebSocket on 8787) and web/ (Vite+TS+Three.js isometric office UI on 5280). No UI framework; hand-rolled DOM via document.createElement + textContent.",
+  "language": "TypeScript (ESM; both packages have \"type\":\"module\")",
+  "build_system": "npm workspaces at repo root. watcher runs via tsx (no emit build). web builds with `tsc && vite build`. No AGENTS.md/CONTRIBUTING/.kiro steering exist. Node 20 types.",
+  "test_framework": "vitest 1.6.1 in watcher only (one suite: watcher/src/roomMap.test.ts, 27 tests). web has NO unit runner — tsc is its type gate.",
+  "build_command": "web: `cd web && npm run build` (runs `tsc && vite build`). watcher: no separate build (tsx).",
+  "test_command": "watcher: `cd watcher && npm test` (vitest run). web: none — `cd web && npm run build` is the type+bundle gate.",
+  "verification_instructions": "V1 (design §8): `cd watcher && npm test` passes (existing 27 + new tool_result cases). V2: `cd web && npm run build` type-checks and bundles cleanly. V3: manual against real/replayed logs — paired rows show the outcome, blocks summarize+collapse, filters+search persist and re-apply live, the guide collapses/reopens, the log reads well at 360px. Clean up any scratch files before finishing.",
+  "snapshot_or_generated_files": null,
+  "environment_constraints": "Local-only app; no deployment is in scope (user decided against Vercel). Ports: web 5280, watcher WebSocket 8787. Baseline confirmed green before planning: watcher 27 tests pass, web build clean. Do not reintroduce the removed header stat counts. Multi-session multi-employee visualization is out of scope.",
+  "contribution_requirements": "No AGENTS.md/CONTRIBUTING.md/steering files in the repo. Hard invariant S1: ALL log-derived strings render via element.textContent or document.createTextNode ONLY — never innerHTML, insertAdjacentHTML, eval, or new Function. Palette rule: the signature green (CSS var --green) is reserved strictly for LIVE / active-room / character; it must NOT be used for active filter chips or success rows. Watcher continues sanitize()->redact()->truncate before any string reaches the web.",
+  "key_patterns": "Watcher parser.ts normalizes one raw messages.jsonl line into an ActivityEvent; sanitize(input,max), redact(text), normalizeTs are its safety helpers; labelFor() and kindFor() switch on payload.type; tool name is set only for tool_call today. index.ts ingest() already pairs tags across call/result via a callTags Map (tool_call sets callTags[callId]=tag; tool_result reads+deletes it; 500-cap FIFO). Web main.ts is module-scoped vars + a WebSocket feed; existing reusable helpers: LEGEND_SWATCH (Partial<Record<RoomId,string>>, keyed by RAW watcher ids incl 'po', no 'founder'), ROOM_ICON, relativeTime(ts), ROOMS[id].label, resolveRoom(id) from rooms.ts (aliases po->founder then validates). addActivity() renders flat rows and caps DOM at 200; applyBubble() drives the 3D speech bubble + header status AND currently injects synthetic log lines via logBubble() (to be removed). react() does confetti/oops on tool_result tags.",
+  "relevant_files": [
+    "watcher/src/parser.ts — add tool_result tool-name helper, '결과' label, tag self-detection, defensive callId read",
+    "watcher/src/types.ts — ActivityEvent already has tool/ok/tag/callId; confirm, add only if missing",
+    "watcher/src/index.ts — ingest(): guard callTags copy so a parser-set tag is not overwritten",
+    "watcher/src/roomMap.ts — TOOL_ROOM table + TEST_HINT regex; the web category sets mirror this (do NOT edit, read as the source of the tool->room mapping)",
+    "watcher/src/roomMap.test.ts — add describe('tool_result', ...) cases; keep all existing green",
+    "web/src/socket.ts — web ActivityEvent (kind:string, room:string|null, tool?/ok?/tag?/callId?); already complete, confirm",
+    "web/src/rooms.ts — RoomId union, ROOMS labels, LEGEND order, resolveRoom() + ROOM_ALIAS (po->founder)",
+    "web/src/main.ts — add categoryOf + CATEGORY table, LogRow/PairIndex pairing, TurnBlock model, LogFilter + rowVisible, renderLog, remove logBubble; wire chips/search/guide-toggle/header-click",
+    "web/src/style.css — #app grid (360px right, collapsible left rail), .activity-controls/.chip-bar/.chip, .activity-row fluid grid + color bar, red/amber emphasis, .panel-toggle",
+    "web/index.html — chip bar + search input inside #activity; guide-toggle button in #floor-guide .panel-head",
+    "web/src/scene3d.ts — provides office.resize(), office.showBubble(), office.goToRoom() (reused, not edited)"
+  ],
+  "directory_structure": "watcher/src/{index.ts(entry+ws+poll),parser.ts,roomMap.ts(classification SSOT),roomState.ts,ringBuffer.ts,sessions.ts,workflows.ts,crew.ts,types.ts,roomMap.test.ts}; web/src/{main.ts(UI wiring),socket.ts(ws client+types),rooms.ts(RoomId+labels),scene3d.ts(Three.js office),officeLayout.ts,style.css}; web/index.html; web/.agents/tasks/{design.md,requirements.md,plan.md,this task dir}."
+}

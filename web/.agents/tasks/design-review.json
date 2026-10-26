@@ -1,0 +1,28 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "NIT",
+      "location": "§3 Summary header format / §6 D4",
+      "problem": "Header start time is described as toLocaleTimeString('ko-KR',{hour12:false}) 'truncated to HH:MM', but that locale call returns HH:MM:SS; the truncation rule is unspecified.",
+      "fix": "Use new Date(startTs).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false}) which yields '14:32' directly, instead of slicing an HH:MM:SS string."
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "location": "§6 / requirements D4",
+      "problem": "D4 requires an absolute time in a title tooltip; current addActivity has no title attribute and the design never pins the tooltip string format.",
+      "fix": "Specify el.title = new Date(ev.ts).toLocaleString('ko-KR') on the row time element."
+    },
+    {
+      "id": 3,
+      "severity": "NIT",
+      "location": "§3 Live-tick mechanism",
+      "problem": "A 15s open-block ticker means the in-progress duration can lag reality by up to ~15s and a sub-tick turn may show 0초; acceptable but unstated.",
+      "fix": "Add one sentence: the open-block duration refreshes on a 15s cadence and is therefore approximate; the exact final duration is written at turn_end. No code change required."
+    }
+  ],
+  "counts": { "high": 0, "medium": 0, "nit": 3 },
+  "reviewDoc": "/Users/shinjia/Project/kiro-office/web/.agents/tasks/design-review.md"
+}

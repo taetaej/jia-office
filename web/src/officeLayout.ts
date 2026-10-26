@@ -17,7 +17,9 @@ export const KIT_BASE = { furniture: KIT_SCALE, food: 0.4, holiday: 0.8, platfor
 export type Kit = keyof typeof KIT_BASE;
 
 export const FLOOR = {
-  minX: 0, maxX: 28, minZ: 0, maxZ: 20,
+  // maxX widened 28 → 31 to add the 비서실 (secretary office) along the new east
+  // edge next to Jia's Office (user-sanctioned: "사무실을 더 넓혀서라도").
+  minX: 0, maxX: 31, minZ: 0, maxZ: 20,
   thickness: 0.3,
   center: { x: 14, z: 10 },
 } as const;
@@ -525,6 +527,35 @@ export const ZONES: ZoneDef[] = [
       { asset: 'pottedPlantPink', rx: 8.55, rz: 0.45 },
       { asset: 'pottedPlantButter', rx: 8.55, rz: 5.55 },
       { asset: 'plantSmall2', rx: 0.4, rz: 5.6 },
+    ],
+  },
+  {
+    // 비서실 (secretary office): a glass-walled strip on the NEW east edge
+    // (x28–31), sharing the z-span and glass wall-line of the founder office so
+    // it sits right next to Jia's Office. World range x:28–31, z:14–20 — touches
+    // founder/test only along shared edges, never overlapping (see design §1.3).
+    id: 'secretary', room: 'secretary', label: '비서실 · SECRETARY',
+    x: 28, z: 14, w: 3.0, d: 6, floor: '#eef0f3', enclosure: 'glass',
+    // door on the WEST edge (toward corridor2 / founder side)
+    door: { edge: 'W', at: 3.2 },
+    // A genuinely walkable corridor2 → open-front band → W-door → seat path that
+    // stays in the secretary x-band (x≥28) and never enters the founder interior.
+    // Only the LAST point is consumed (buildSecretary places the cat statically);
+    // the secretary never walks, so the rest documents a correct-if-traversed route.
+    route: [
+      [CORRIDOR2_X, CORRIDOR_Z], // 18, 8.25  (on the main corridor line)
+      [CORRIDOR2_X, 19.4],       // 18, 19.4  (down corridor2 to the open front band, < maxZ=20)
+      [28.6, 19.4],              // 28.6,19.4 (east across the open front band, in front of 비서실)
+      [28.6, 17.2],              // 28.6,17.2 (up to the W door opening at world z=14+3.2=17.2)
+      [29.5, 15.6],              // 29.5,15.6 (the secretary's standing/seat spot — the only consumed point)
+    ],
+    furniture: [
+      // the secretary looks WEST (toward the founder glass / 사장님) so her
+      // attention bubble reads toward the boss office.
+      ...workstation(1.2, 1.6, 'W', { monitors: 1, chair: PALETTE.navy }),
+      // decor only — plants are exempt from the tall-in-front verifier rule
+      { asset: 'pottedPlantMint', rx: 2.4, rz: 0.5 },
+      { asset: 'plantSmall1', rx: 2.4, rz: 5.5 },
     ],
   },
 ];

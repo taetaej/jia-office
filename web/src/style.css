@@ -247,44 +247,62 @@ body {
 
 /* ---- activity log: blocks + rows ---- */
 .activity-list { padding: 4px 8px 16px; }
+/* Each turn is a card so the grouping reads at a glance: a bordered, tinted
+   block with a bold header and its rows visibly nested beneath it. */
 .activity-block {
   list-style: none;
-  border-bottom: 1px solid hsl(var(--border) / 0.5);
-  padding: 2px 0;
+  margin: 0 0 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--panel));
+  overflow: hidden;
 }
-.activity-block.loose { border-bottom: none; }
+/* loose (un-grouped) rows get no card chrome — they read as a plain list */
+.activity-block.loose {
+  border: none; background: none; margin: 0 0 2px;
+}
 
 .block-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 6px;
+  padding: 8px 10px;
   cursor: pointer;
-  border-radius: 7px;
+  background: hsl(var(--panel-2) / 0.6);
+  border-bottom: 1px solid transparent;
 }
 .block-head:hover { background: hsl(var(--panel-2)); }
-.block-caret { color: hsl(var(--faint)); font-size: 10px; width: 10px; flex: none; }
+/* when expanded, separate the header from its rows with a divider */
+.activity-block.expanded .block-head { border-bottom-color: hsl(var(--border)); }
+.block-caret { color: hsl(var(--muted)); font-size: 10px; width: 10px; flex: none; }
 .block-time {
-  color: hsl(var(--muted)); font-variant-numeric: tabular-nums;
-  font-size: 11px; flex: none;
+  color: hsl(var(--ink)); font-variant-numeric: tabular-nums;
+  font-size: 11px; font-weight: 700; flex: none;
 }
 .block-counts {
   flex: 1; min-width: 0;
-  font-size: 11px; color: hsl(var(--fg));
+  font-size: 11px; font-weight: 600; color: hsl(var(--fg));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .block-dur {
-  flex: none; font-size: 10px; color: hsl(var(--faint));
+  flex: none; font-size: 10px; color: hsl(var(--muted));
   font-variant-numeric: tabular-nums;
 }
 
-.block-rows { list-style: none; margin: 0; padding: 0 0 4px; }
+/* rows nested under the header: a hairline rail on the left shows containment */
+.block-rows {
+  list-style: none; margin: 0; padding: 2px 6px 4px;
+  background: hsl(var(--panel));
+}
 .activity-row {
   display: grid;
   grid-template-columns: auto auto 1fr auto;
   gap: 6px 8px;
   align-items: baseline;
-  padding: 5px 6px 5px 4px;
+  padding: 5px 6px 5px 8px;
   font-size: 12px;
+  border-radius: 6px;
 }
+.activity-row + .activity-row { border-top: 1px solid hsl(var(--border) / 0.4); }
+.activity-row:hover { background: hsl(var(--panel-2) / 0.5); }
 .row-bar {
   width: 3px; align-self: stretch; border-radius: 2px;
   background: transparent;

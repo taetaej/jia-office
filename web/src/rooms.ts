@@ -21,6 +21,7 @@ export type RoomId =
   | 'po'       // watcher id; legend display; aliases to layout 'founder'
   | 'lobby'
   | 'founder'  // spec layout id (same office as 'po')
+  | 'secretary' // layout-only: 비서실 (resolvable, but NOT in the legend / no watcher routing)
   | 'corridor'; // spec layout-only routing zone (no legend entry)
 
 export interface RoomRect {
@@ -43,6 +44,7 @@ export const ROOMS: Record<RoomId, RoomRect> = {
   server:   { id: 'server',   label: '서버실',   sub: 'SERVER',   desc: '명령 실행·빌드·프로세스' },
   po:       { id: 'po',       label: "Jia's Office", sub: 'FOUNDER', desc: '대표에게 승인 요청' },
   founder:  { id: 'founder',  label: "Jia's Office", sub: 'FOUNDER' },
+  secretary: { id: 'secretary', label: '비서실', sub: 'SECRETARY' },
   corridor: { id: 'corridor', label: '복도',     sub: 'CORRIDOR' },
 };
 

@@ -82,6 +82,10 @@ const BOSS_TABBY: CatColors = { body: '#b9bec6', patchA: '#8a929c', patchB: '#6f
 // soft orange-marmalade patches (a white van-pattern ginger), cream muzzle, warm
 // amber eyes. Light and cute, clearly distinct from the calico agent.
 const BOSS_CHEESE: CatColors = { body: '#faf3e6', patchA: '#f0b865', patchB: '#e09a44', muzzle: '#fffaf0', eye: '#7a5a2a' };
+// 비서냥 (secretary): a tidy cool-grey cat with navy accents + glasses. Distinct
+// from the calico agent (warm cream/orange) and the cheese boss (creamy ginger).
+// Navy coat alternative (not built): body #3f4b63, patchA #34405a, patchB #2b3550, eye #d79a2b.
+const SECRETARY_GREY: CatColors = { body: '#9aa3ad', patchA: '#7c848f', patchB: '#5c646f', muzzle: '#eef0f2', eye: '#3f4b63' };
 
 /** Chibi cat (~0.85 tall at scale 1, facing +z). The head (with eyes) and the
     two front paws are separate so poses can tilt, blink, wave and knead. */
@@ -221,6 +225,15 @@ export class Office3D {
   private bossUntil = 0;
   private bossHud!: Hud;
   private stamp: { root: THREE.Group; seal: THREE.Mesh; tool: THREE.Group } | null = null;
+  // 비서냥 (secretary): a fixed, seated desk worker in 비서실 who relays + emphasizes
+  // approval-waiting status. Built once; never walks.
+  private secretary: { root: THREE.Group; parts: CatParts } | null = null;
+  private secretaryHud!: Hud;
+  private secretaryMode: 'idle' | 'alert' | 'relax' = 'idle';
+  private secretaryUntil = 0;         // relax bubble expiry (performance.now ms)
+  private secretaryPending = 0;       // outstanding approvals (pending-seen − resolved-seen, floored at 0)
+  private secretaryEscalateAt = 0;    // ts after which to escalate the alert
+  private secretaryEscalated = false; // guards the one-shot escalation re-show
   private zoom = 1.0;
   private zoomTarget = 1.0;
   private pan = new THREE.Vector2(0, 0);
@@ -257,6 +270,7 @@ export class Office3D {
     // looked bad through the windows. Keep the outside empty (clean background).
     // this.buildSkyBackdrop();
     this.buildCharacter();
+    this.buildSecretary(); // after buildCharacter so labelRoot / agentHud / zone labels exist
     this.setupComposer();
     this.setupInput(canvas);
     this.resize();
@@ -596,6 +610,11 @@ export class Office3D {
         if (e.edge === 'W' && z.x === FLOOR.minX) continue;
         if (e.edge === 'S' && z.z + z.d === FLOOR.maxZ) continue;
         if (e.edge === 'E' && z.x + z.w === FLOOR.maxX) continue;
+        // 비서실: its back (north) edge faces open floor, not another room — no pane.
+        if (e.edge === 'N' && z.id === 'secretary') continue;
+        // founder: its east edge is now the shared interior line with 비서실, which the
+        // secretary's own W pane (+door) glazes — keep the founder front open as before.
+        if (e.edge === 'E' && z.id === 'founder') continue;
         const along = e.edge === 'N' || e.edge === 'S' ? 'x' : 'z';
         const start = along === 'x' ? e.a[0] : e.a[1], end = along === 'x' ? e.b[0] : e.b[1];
         const fixed = along === 'x' ? e.a[1] : e.a[0];
@@ -1976,14 +1995,151 @@ export class Office3D {
     return moving;
   }
 
+  // ---- secretary cat (비서냥): fixed desk worker in 비서실 ------------------
+  private buildSecretary(): void {
+    const z = zoneById('secretary');
+    if (!z) return; // zone not found — safe no-op
+
+    const { cat, tail } = makeCat(SECRETARY_GREY);
+    const parts = { ...makeCat(SECRETARY_GREY), cat, tail };
+
+    // glasses: two small lens rings parented to the cat head, boss-accessory style
+    const glassMat = new THREE.MeshStandardMaterial({ color: '#2b2e35', roughness: 0.6, metalness: 0.3 });
+    const lensSide = 0.045;
+    const lensL = new THREE.Mesh(new THREE.TorusGeometry(lensSide, 0.008, 6, 16), glassMat);
+    const lensR = new THREE.Mesh(new THREE.TorusGeometry(lensSide, 0.008, 6, 16), glassMat);
+    // head-local positions: ±0.055 x, 0.145 y, 0.16 z (just in front of the eye plane)
+    lensL.position.set(-0.055, 0.145, 0.16);
+    lensR.position.set( 0.055, 0.145, 0.16);
+    lensL.rotation.x = Math.PI / 2;
+    lensR.rotation.x = Math.PI / 2;
+    const bridge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.006, 0.006),
+      glassMat,
+    );
+    bridge.position.set(0, 0.145, 0.16);
+    parts.head.add(lensL, lensR, bridge);
+
+    const root = new THREE.Group();
+    root.add(cat);
+    root.scale.setScalar(0.85);
+
+    // seat spot is the last route point; place the secretary there
+    const seat = z.route?.at(-1) ?? [z.x + z.w / 2, z.z + z.d / 2];
+    root.position.set(seat[0], 0, seat[1]);
+    // face west (toward the founder office entrance)
+    root.rotation.y = -Math.PI / 2;
+
+    this.scene.add(root);
+    this.secretary = { root, parts };
+
+    this.secretaryHud = new Hud(this.labelRoot, '🔔 비서냥', 'crew');
+
+    resetPose(parts);
+  }
+
+  /** Public API: called from main.ts when a pending_interaction fires. */
+  secretaryAlert(count: number): void {
+    if (!this.secretary) return;
+    this.secretaryPending = Math.max(this.secretaryPending, count);
+    this.secretaryMode = 'alert';
+    this.secretaryEscalated = false;
+    this.secretaryEscalateAt = Date.now() + 20_000; // escalate after 20s
+    const msg = this.secretaryPending > 1
+      ? `🔔 결재 ${this.secretaryPending}건 대기 중이에요!`
+      : '🔔 사장님! 결재 기다리고 있어요!';
+    this.secretaryHud.show({ mode: 'waiting', icon: '🔔', title: msg, since: Date.now() });
+    this.secretaryHud.setEscalated(false);
+    // dial-up the agent's waiting bubble too (the ❗ emphasis)
+    this.agentHud.setEmphasis(true);
+  }
+
+  /** Public API: called from main.ts when interaction_resolved fires. */
+  secretaryResolve(): void {
+    if (!this.secretary) return;
+    this.secretaryPending = Math.max(0, this.secretaryPending - 1);
+    if (this.secretaryPending > 0) {
+      // still more outstanding
+      this.secretaryAlert(this.secretaryPending);
+      return;
+    }
+    this.secretaryMode = 'relax';
+    this.secretaryUntil = performance.now() + 3000;
+    this.secretaryHud.show({ mode: 'say', icon: '✅', title: '처리 완료!', sub: '수고하셨어요', since: Date.now() });
+    this.secretaryHud.setEscalated(false);
+    this.agentHud.setEmphasis(false);
+  }
+
+  /** Public API: called from main.ts on turn_end / calm down. */
+  secretaryCalm(): void {
+    if (!this.secretary || this.secretaryPending > 0) return;
+    this.secretaryMode = 'idle';
+    this.secretaryHud.show(null);
+    this.secretaryHud.setEscalated(false);
+    this.agentHud.setEmphasis(false);
+  }
+
+  /** Re-arm alert on reconnect/catchup if a pending_interaction is still active. */
+  secretaryRestore(count: number): void {
+    this.secretaryPending = count;
+    if (count > 0) this.secretaryAlert(count);
+    else this.secretaryCalm();
+  }
+
+  private updateSecretary(dt: number, now: number, el: HTMLCanvasElement): boolean {
+    const s = this.secretary;
+    if (!s) return false;
+
+    // idle: gentle typing bob + blink
+    const t = now * 0.001;
+    s.parts.head.rotation.z = Math.sin(t * 0.9) * 0.03;
+    if (Math.random() < dt * 0.3) blink(s.parts);
+
+    // alert mode: light bob to show urgency
+    if (this.secretaryMode === 'alert') {
+      s.root.position.y = Math.abs(Math.sin(t * 3.5)) * 0.04;
+      // escalate after threshold
+      if (!this.secretaryEscalated && Date.now() > this.secretaryEscalateAt) {
+        this.secretaryEscalated = true;
+        const msg = this.secretaryPending > 1
+          ? `🚨 결재 ${this.secretaryPending}건 계속 대기 중이에요!`
+          : '🚨 사장님! 결재가 오래 기다려요!';
+        this.secretaryHud.show({ mode: 'waiting', icon: '🚨', title: msg, since: Date.now() });
+        this.secretaryHud.setEscalated(true);
+      }
+    } else {
+      s.root.position.y = 0;
+      // relax bubble expires
+      if (this.secretaryMode === 'relax' && performance.now() > this.secretaryUntil) {
+        this.secretaryMode = 'idle';
+        this.secretaryHud.show(null);
+      }
+    }
+
+    // HUD projection (same pattern as boss)
+    this.secretaryHud.update();
+    if (this.secretaryHud.visible) {
+      this.tmp.copy(s.root.position); this.tmp.y += 0.95; this.tmp.project(this.camera);
+      const hx = (this.tmp.x * 0.5 + 0.5) * el.clientWidth;
+      const hy = (-this.tmp.y * 0.5 + 0.5) * el.clientHeight;
+      this.secretaryHud.place(hx, hy);
+      this.hudSpots.push([hx, hy]);
+    } else {
+      this.secretaryHud.place(-9999, -9999, 0);
+    }
+
+    return false;
+  }
+
   /** Crew, reactions and the boss: everything that animates besides the agent. */
   private renderExtras(dt: number, now: number, el: HTMLCanvasElement): void {
     this.hudSpots = [];
     const crewMoving = this.updateCrewCats(dt, now, el);
     const bossMoving = this.updateBoss(dt, now, el);
+    const secMoving = this.updateSecretary(dt, now, el);
     this.updateReactions(dt, now);
     this.updateElevator(dt, now);
-    if (crewMoving || bossMoving) this.renderer.shadowMap.needsUpdate = true;
+    if (crewMoving || bossMoving || secMoving) this.renderer.shadowMap.needsUpdate = true;
   }
 
   // ---- camera framing ---------------------------------------------------------
@@ -2089,7 +2245,7 @@ export class Office3D {
       l.el.style.opacity = l.hoverOnly ? (this.hoverZone === l.zone ? '1' : '0') : '1';
       // a room label right under the cat's bubble would collide with it: fade it
       // out — EXCEPT the founder room, which must always stay clearly readable.
-      if (l.zone !== 'founder'
+      if (l.zone !== 'founder' && l.zone !== 'secretary'
           && this.hudSpots.some(([hx, hy]) => Math.abs(x - hx) < 130 && y > hy - 110 && y < hy + 40)) {
         l.el.style.opacity = '0.12';
       }

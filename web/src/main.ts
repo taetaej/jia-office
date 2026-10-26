@@ -188,7 +188,7 @@ function renderFloors(): void {
 // from the (untrusted) payload.
 export type Category =
   | 'read' | 'write' | 'run' | 'test' | 'commit'
-  | 'web' | 'plan' | 'approve' | 'done' | 'other';
+  | 'web' | 'plan' | 'approve' | 'done' | 'talk' | 'other';
 
 interface CategoryMeta { label: string; icon: string; }
 const CATEGORY: Record<Category, CategoryMeta> = {
@@ -201,11 +201,12 @@ const CATEGORY: Record<Category, CategoryMeta> = {
   plan:    { label: '계획',   icon: '📝' },
   approve: { label: '승인',   icon: '✋' },
   done:    { label: '완료',   icon: '✅' },
+  talk:    { label: '대화',   icon: '💬' },
   other:   { label: '기타',   icon: '•' },
 };
 /** Count display order per design §1. */
 const CATEGORY_ORDER: Category[] = [
-  'read', 'write', 'run', 'test', 'commit', 'web', 'plan', 'approve', 'done', 'other',
+  'read', 'write', 'run', 'test', 'commit', 'web', 'plan', 'approve', 'done', 'talk', 'other',
 ];
 
 // Tool-name → category sets (mirror of watcher roomMap TOOL_ROOM; the web keeps
@@ -252,8 +253,11 @@ export function categoryOf(ev: ActivityEvent): Category {
     return roomCategory(r);
   }
   if (ev.kind === 'assistant') {
-    return ev.label === 'thinking' ? 'plan' : 'other';
+    // thinking is planning; a plain assistant "say" is conversation
+    return ev.label === 'thinking' ? 'plan' : 'talk';
   }
+  // user turns (and anything else without a work room) read as conversation
+  if (ev.kind === 'user') return 'talk';
   return roomCategory(r);
 }
 
@@ -311,7 +315,10 @@ function currentOpenBlock(): TurnBlock | undefined {
   return b && b.open ? b : undefined;
 }
 
-/** Route one event into the pure block model. DOM-free. */
+/** Route one event into the pure block model. DOM-free.
+    EVERYTHING is kept — the log is a complete record of the session (tools,
+    thoughts, conversation, approvals, system events). Categories/icons/colors
+    organize it; the filter chips let the user narrow it, but 전체 shows it all. */
 function applyEvent(ev: ActivityEvent): void {
   if (ev.kind === 'turn_start') {
     for (const b of blocks) b.open = false;
@@ -328,10 +335,12 @@ function applyEvent(ev: ActivityEvent): void {
     return;
   }
 
-  // a work event: find the open block or spin up a loose (ungrouped) block
+  // A work/talk event. Find the open block, or start an implicit one. Implicit
+  // blocks ('auto:') behave exactly like turn blocks (header + card) so NOTHING
+  // ends up in an un-grouped flat list — every row lives in a collapsible block.
   let block = currentOpenBlock();
   if (!block) {
-    block = { id: `loose:${blockSeq++}`, startTs: ev.ts, open: true, rows: [], counts: {} };
+    block = { id: `auto:${blockSeq++}`, startTs: ev.ts, open: true, rows: [], counts: {} };
     blocks.unshift(block);
   }
 
@@ -385,6 +394,14 @@ function enforceRowCap(): void {
   }
 }
 
+/** Zero-padded HH:MM in local time (locale-independent — no "오전 10:5" clipping). */
+function fmtClock(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 function fmtDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
@@ -409,10 +426,12 @@ const FILTER_Q_KEY = 'ko.activity.filter.q';
 const GUIDE_COLLAPSED_KEY = 'ko.guide.collapsed';
 
 export function rowVisible(row: LogRow, f: LogFilter): boolean {
+  // 전체 (no chips) shows EVERYTHING — the full session record. Chips only
+  // narrow the view when the user opts in; they never hide anything by default.
   const catOk = f.cats.size === 0 || f.cats.has(row.category);
   if (!catOk) return false;
   if (!f.q) return true;
-  const hay = `${row.ev.label} ${row.ev.detail ?? ''} ${row.ev.tool ?? ''}`.toLowerCase();
+  const hay = `${row.ev.label} ${row.ev.detail ?? ''} ${row.ev.tool ?? ''} ${roomLabelFor(row.ev)}`.toLowerCase();
   return hay.includes(f.q.toLowerCase());
 }
 
@@ -515,6 +534,7 @@ function buildRow(row: LogRow): HTMLLIElement {
 function blockCountSummary(b: TurnBlock): string {
   const parts: string[] = [];
   for (const cat of CATEGORY_ORDER) {
+    if (cat === 'talk') continue; // conversation isn't "work" — keep it out of the summary
     if (cat === 'done' || cat === 'other') continue; // omit from the summary
     const n = b.counts[cat];
     if (n) parts.push(`${CATEGORY[cat].icon} ${n}`);
@@ -541,7 +561,7 @@ function buildBlockHeader(b: TurnBlock, expanded: boolean): HTMLDivElement {
 
   const start = document.createElement('span');
   start.className = 'block-time';
-  start.textContent = new Date(b.startTs).toLocaleTimeString('ko-KR', { hour12: false }).slice(0, 5);
+  start.textContent = fmtClock(b.startTs);
 
   const counts = document.createElement('span');
   counts.className = 'block-counts';
@@ -562,30 +582,29 @@ function buildBlockHeader(b: TurnBlock, expanded: boolean): HTMLDivElement {
 function renderLog(): void {
   activityList.textContent = '';
   for (const b of blocks) {
-    const isLoose = b.id.startsWith('loose:');
     // collect the visible rows for this block
     const visible = b.rows.filter((row) => rowVisibleStructural(row, filter));
-    if (visible.length === 0 && !isLoose) continue; // skip empty blocks (grouped)
-    if (visible.length === 0 && isLoose) continue;
+    if (visible.length === 0) continue; // skip blocks with nothing to show
+
+    // Newest-first WITHIN a block too (log convention): rows are stored in
+    // arrival order (oldest→newest), so render them reversed.
+    const ordered = visible.slice().reverse();
 
     const li = document.createElement('li');
-    li.className = 'activity-block' + (isLoose ? ' loose' : '');
+    li.className = 'activity-block';
 
-    if (!isLoose) {
+    // Every block (explicit turn OR implicit 'auto') gets a header + card so
+    // the whole log is consistently grouped — no stray flat list.
+    {
       const expanded = isExpanded(b);
+      if (expanded) li.classList.add('expanded');
       li.append(buildBlockHeader(b, expanded));
       if (expanded) {
         const rowsUl = document.createElement('ul');
         rowsUl.className = 'block-rows';
-        for (const row of visible) rowsUl.append(buildRow(row));
+        for (const row of ordered) rowsUl.append(buildRow(row));
         li.append(rowsUl);
       }
-    } else {
-      // loose blocks: header-less, always expanded (flat-list parity)
-      const rowsUl = document.createElement('ul');
-      rowsUl.className = 'block-rows';
-      for (const row of visible) rowsUl.append(buildRow(row));
-      li.append(rowsUl);
     }
     activityList.append(li);
   }
