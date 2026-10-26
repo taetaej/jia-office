@@ -1,126 +1,167 @@
-# Kiro Office — Live Work Viewer
+# Kiro Office — 실시간 작업 뷰어
 
-A small, local, **standalone** viewer that tails your Kiro session logs in real time
-and renders an **isometric office** (Canvas 2D). A character walks between rooms based
-on what the agent is currently doing — reading code, writing code, running commands,
-searching the web, writing specs, running tests, or reporting to the PO for approval.
+Kiro 세션 로그를 실시간으로 따라 읽어서, 가구가 놓인 **아이소메트릭 3D 사무실**(Three.js /
+WebGL)로 보여주는 작고 로컬에서 도는 **독립형** 뷰어예요. 고양이 캐릭터 **에이전트냥**이
+지금 에이전트가 하는 일에 따라 방 사이를 걸어다녀요 — 코드 읽기, 코드 작성, 명령 실행,
+웹 검색, 계획·워크플로우 조율, 테스트 실행, 그리고 승인을 받으러 대표(**대표냥**)에게
+보고하기까지. 워크플로우 서브에이전트와 최근 다른 세션들은 **직원냥**(크루 고양이)으로
+나타나서, 엘리베이터를 타고 출근해 에이전트냥 옆에서 함께 일해요.
 
-It reads logs from `~/.kiro/sessions/<hash>/<sessionId>/messages.jsonl`. It never
-modifies them, never sends anything off-machine, and treats all log content as
-untrusted (text-only rendering, truncation, no eval, no secret values surfaced).
+로그는 `~/.kiro/sessions/<hash>/<sessionId>/messages.jsonl`에서 읽어요. 로그를 **수정하지
+않고**, 아무것도 **외부로 전송하지 않으며**, 모든 로그 내용을 신뢰할 수 없는 데이터로
+취급해요(`textContent`로만 렌더링, 길이 제한, `innerHTML` 없음, eval 없음, 비밀값 노출 없음).
 
-## Run it (one command)
+## 실행 (명령어 하나)
 
     cd /Users/shinjia/Project/kiro-office && npm install && npm run dev
 
-Then open: **http://localhost:5280**
+그다음 접속: **http://localhost:5280**
 
-The single start command runs **both** processes together via concurrently:
-- the **watcher** (Node + TS via tsx) — discovers sessions, tails the live one,
-  and serves a WebSocket on 8787.
-- the **web** app (Vite + TS, Canvas 2D) — the office view on 5280.
+이 한 줄짜리 실행 명령은 `concurrently`로 **두 프로세스를 함께** 띄워요:
+- **watcher** (Node + TS, tsx) — 세션을 찾아내고, 활성 세션을 깊게 따라 읽고(deep-tail),
+  나머지는 크루용으로 꼬리만 엿보며(tail-peek), 8787 포트에서 WebSocket을 제공.
+- **web** 앱 (Vite + TS, Three.js) — 5280 포트의 3D 사무실 화면.
 
-### Ports
+유닛 테스트 (watcher의 방 분류 로직):
 
-| Thing | Port | Note |
+    npm test            # → npm -w watcher test (vitest)
+
+### 포트
+
+| 대상 | 포트 | 비고 |
 |---|---|---|
-| ReadySet platform (the other project) | **3000** | untouched |
-| Kiro Office web (Vite) | **5280** | open this in the browser |
-| Kiro Office watcher (WebSocket) | **8787** | the web app connects here |
+| ReadySet 플랫폼 (다른 프로젝트) | **3000** | 건드리지 않음 |
+| Kiro Office web (Vite) | **5280** | 브라우저로 여기 접속 |
+| Kiro Office watcher (WebSocket) | **8787** | web 앱이 여기에 연결 |
 
-Ports are overridable via env and the defaults work with **no config**:
+포트는 환경변수로 바꿀 수 있고, 기본값은 **설정 없이** 바로 동작해요:
 
     KO_WEB_PORT=5300 KO_WS_PORT=8800 npm run dev
 
-## What you see
+## 등장 캐릭터
 
-- **Top bar** — current session name + a green LIVE badge (green = connected).
-- **Left · 층별 안내 / FLOOR GUIDE** — every discovered session as a "floor"
-  (short id + friendly name/hash + relative last-activity). A green LIVE dot marks
-  the most-recently-active session. Click a floor to switch the office view.
-  An **auto-follow** toggle keeps the character tracking the live room.
-- **Center** — the isometric office with furnished rooms and a character that tweens
-  between them. A small **어디서 무엇을 하나 / ROOM GUIDE** legend sits bottom-left and
-  highlights the current room in green.
-- **Right · 활동 로그 / ACTIVITY LOG** — normalized events, newest first.
+- **에이전트냥** — 삼색이(캘리코) 에이전트 고양이. 포커스 중인 세션의 에이전트예요. 현재
+  활동이 가리키는 방으로 걸어가고, 말풍선(고민 중 / 작업 중 / 대기 중 / 완료)을 달고
+  다니며, 할 일이 없으면 로비 소파에서 낮잠을 자요.
+- **대표냥** — **Jia's Office**에 사는 흰색 대표(보스) 고양이. 평소엔 공놀이 / 뒹굴기 /
+  잠자기를 반복하다가, 에이전트가 승인이 필요하면 일어나 책상으로 가서 결재 도장을 찍어요.
+- **직원냥** — 크루 고양이들. 실행 중인 **워크플로우 서브에이전트**마다 한 마리(비니 모자
+  착용), 그리고 최근 **다른 세션** 몇 개. **엘리베이터**를 타고 와서 인사하고, 빈 자리를
+  차지하거나(방이 꽉 차면 둥글게 서 있음) 자기 말풍선을 달고 일하다가, 일이 끝나거나
+  조용해지면 다시 엘리베이터를 타고 올라가요.
 
-The signature **green** is reserved for "the system is pointing here" — the LIVE dot,
-the active-room highlight, and the character marker. Never a furniture color.
+## 화면 구성
 
-## ROOM MAPPING
+- **상단 바** — 브랜드, 한 줄 상태 표시줄, 그리고 초록색 **LIVE** 배지(초록 = watcher
+  연결됨). 상태 표시줄은 상태 점 + "`<방>에서 <상태>`" 문장(예: "개발실에서 작업 중")
+  + 흐린 세션 이름으로 되어 있어요. 상태는 작업 중 / 대기 / 승인 대기 / 고민 중 중 하나로,
+  말풍선을 움직이는 것과 **동일한 이벤트 신호**에서 뽑아내 둘이 어긋나지 않아요. 라이브
+  세션이 실제로 일할 때만 점이 초록으로 켜져요.
+- **왼쪽 · 층별 안내 / FLOOR GUIDE** — 발견된 모든 세션을 "층"으로 표시(짧은 id + 친근한
+  이름/해시 + 상대 시각의 마지막 활동). 초록 LIVE 점이 가장 최근 활동 세션을 표시해요.
+  층을 클릭하면 그 세션 화면으로 전환. **자동 따라가기** 토글을 켜면 화면이 항상 라이브
+  세션을 따라가요.
+- **가운데** — 아이소메트릭 3D 사무실: 가구가 놓인 방들, 그 사이를 이동하는 에이전트냥,
+  대표냥, 그리고 직원냥들. 왼쪽 아래에 **어디서 무엇을 하나 · ROOM GUIDE** 범례가 있어요.
+  범례는 방마다 색 견본 + 방 이름 + 한 줄 용도 설명(예: 개발실 — "코드를 작성·수정")을
+  세로로 나열하고, 현재 방 이름을 초록색으로 강조해요.
+- **오른쪽 · 활동 로그 / ACTIVITY LOG** — 정규화된 이벤트, 최신순.
 
-The watcher owns which room the character is in. Precedence (in order; see
-watcher/src/roomMap.ts):
+시그니처 **초록색**은 "시스템이 지금 여기를 가리킨다"는 뜻으로만 써요 — LIVE 점, 현재 방
+강조, 에이전트 마커. 가구 색으로는 절대 쓰지 않아요.
 
-1. execute_bash whose args mention a test runner (vitest / playwright / jest /
-   e2e / "npm test" / "npm run test") -> **test** (beats server).
-2. fs_write / str_replace whose path looks like a spec/plan (/specs/, /spec,
-   plan, .kiro/specs) -> **meeting** (beats dev).
-3. Tool lookup table:
-   - read_file / read_code / grep_search / file_search / list_directory -> **archive**
-   - str_replace / fs_write / fs_append / semantic_rename / smart_relocate -> **dev**
-   - execute_bash / control_bash_process / get_process_output -> **server**
-   - remote_web_search / web_fetch -> **research**
-4. Fallback: a tool name containing mcp **or** any unknown tool -> **research**, and
-   the tool name is logged (never silently dropped).
+## 방 매핑 (ROOM MAPPING)
 
-Plus:
-- assistant operationType Reasoning / agent_note -> **meeting** (thinking cloud).
-- pending_interaction -> **po** (character reports to the PO office; a speech bubble
-  shows the truncated + escaped question).
-- interaction_resolved -> return to the prior work room.
-- between turn_end and the next turn_start with no pending interaction -> **lobby**.
+캐릭터가 어느 방에 있는지는 watcher가 결정해요. 분류 로직은 격리된 유닛 테스트 모듈
+(`watcher/src/roomMap.ts`) 하나에 모여 있어요. 우선순위(위에서부터 순서대로):
 
-Workflow activity (~/.kiro/sessions/<hash>/workflows/wf_*/workflow-state.json) is
-surfaced in the **activity log only** — it does not move the character.
+1. 인자에 테스트 러너가 언급된 `execute_bash` (vitest / playwright / jest / e2e /
+   "npm test" / "npm run test") → **test** (server보다 우선).
+2. 경로가 스펙/계획처럼 보이는 `fs_write` / `str_replace` (`/specs/`, `/spec`, `plan`,
+   `.kiro/specs`) → **meeting** (dev보다 우선).
+3. 툴 조회 테이블:
+   - `read_file` / `read_code` / `grep_search` / `file_search` / `list_directory` → **archive**
+   - `str_replace` / `fs_write` / `fs_append` / `semantic_rename` / `smart_relocate` → **dev**
+   - `execute_bash` / `control_bash_process` / `get_process_output` → **server**
+   - `remote_web_search` / `web_fetch` → **research**
+   - `run_workflow` / `update_workflow` / `inspect_workflow` / `validate_workflow` /
+     `send_message` / `todo_list` / `update_session_information` → **meeting**
+     (조율·조정 — 에이전트가 방에서 직접 "일"하는 게 아니라 지시·위임하는 행위)
+   - `create_artifact` → **dev** (문서/결과물을 실제로 만드는 작성 작업)
+4. 폴백: 이름에 `mcp`가 들어가거나 알 수 없는 툴 → **research**, 그리고 툴 이름을
+   기록(조용히 버리지 않음).
 
-## Rooms & furniture
+여기에 더해:
+- assistant `operationType` Reasoning / `agent_note` → **meeting** (고민 중).
+- `pending_interaction` → **po** (에이전트가 대표 사무실로 보고하러 감. 말풍선에 잘린 +
+  이스케이프된 질문이 뜨고, 대표냥이 책상으로 와서 도장을 찍음).
+- `interaction_resolved` → 직전 작업 방으로 복귀.
+- `turn_end` 이후 다음 `turn_start` 사이에 대기 중인 상호작용이 없으면 → **lobby**
+  (에이전트냥이 소파에서 낮잠).
 
-archive (bookshelves + reading desk) · dev (desks with cool-blue-glowing monitors) ·
-server (racks with blinking LEDs) · research (globe + world-map board + desk) ·
-meeting (glass-walled room, long table, whiteboard) · test (desk + checklist board) ·
-po (a distinct, slightly-larger glass office with a desk + a 'PO' nameplate placeholder) ·
-lobby (central reception + sofa + corner plants).
+워크플로우 활동(`~/.kiro/sessions/<hash>/workflows/wf_*/workflow-state.json`)은
+**직원냥 크루 고양이**(실행 중인 단계마다 한 마리)를 움직이고, 활동 로그에도 표시돼요.
 
-## Project layout
+## 방 & 가구
+
+아카이브 / ARCHIVE (책장 + 열람 책상) · 개발실 / DEV (파란빛 모니터가 놓인 책상) ·
+서버실 / SERVER (LED가 깜빡이는 랙) · 리서치 / RESEARCH (지구본 + 세계지도 보드 + 책상) ·
+회의실 / MEETING (유리벽 방, 긴 테이블, 화이트보드) · 테스트실 / TEST (책상 + 체크리스트
+보드) · Jia's Office / FOUNDER (조금 더 크고 뚜렷한 유리 사무실 — 대표 책상, 침대, 명패.
+대표냥의 공간) · 로비 / LOBBY (중앙 리셉션 + 소파 + 화분).
+
+팔레트는 웜-미니멀이에요: 모노크롬 그레이스케일 기본 + 파우더블루 보조색 + 번트오렌지
+포인트 하나, 그리고 시스템 신호용으로 아껴 쓰는 시그니처 초록.
+
+## 프로젝트 구조
 
     kiro-office/
-      package.json        root: single start command (concurrently) + npm workspaces
-      watcher/            Node + tsx; deps: ws, chokidar
-        src/index.ts        discovery + tail + WebSocket server
-        src/roomMap.ts      the isolated classification module (unit-tested)
-        src/roomState.ts    owns current-room computation (prior room / lobby rules)
-        src/parser.ts       normalize + sanitize log lines (untrusted)
-        src/sessions.ts     discovery + incremental LineTailer
-        src/ringBuffer.ts   bounded history, monotonic seq
-        src/workflows.ts    workflow status -> activity log only
-        src/roomMap.test.ts vitest unit tests
-      web/                Vite + Canvas 2D (no game engine)
-        src/iso.ts          isometric projection + primitives
-        src/rooms.ts        floor plan + per-room furniture
-        src/character.ts    tweening character + thinking/speech bubbles
-        src/socket.ts       WebSocket client (auto-reconnect)
-        src/main.ts         render loop + UI chrome
+      package.json        루트: 단일 실행 명령(concurrently) + npm 워크스페이스
+      watcher/            Node + tsx; 의존성: ws, chokidar
+        src/index.ts        세션 발견 + tail + WebSocket 서버 (라이브 세션 선택)
+        src/roomMap.ts      격리된 방 분류 모듈 (유닛 테스트됨)
+        src/roomState.ts    현재 방 계산 담당 (직전 방 / 로비 규칙)
+        src/crew.ts         크루 목록: 워크플로우 서브에이전트 + 다른 세션 (tail-peek)
+        src/parser.ts       로그 라인 정규화 + 새니타이즈 (신뢰 불가 데이터)
+        src/sessions.ts     세션 발견 + 증분 LineTailer
+        src/ringBuffer.ts   크기 제한 히스토리, 단조 증가 seq
+        src/workflows.ts    워크플로우 상태 → 활동 로그
+        src/types.ts        공유 타입 + WebSocket 프레임 형태
+        src/roomMap.test.ts vitest 유닛 테스트
+      web/                Vite + Three.js (게임 엔진 없음)
+        src/scene3d.ts      3D 사무실: 빌드, 에이전트냥, 대표냥, 크루, 엘리베이터
+        src/officeLayout.ts 데이터 기반 존/가구/경로/벽/엘리베이터
+        src/models.ts       GLB/에셋 로딩 헬퍼
+        src/crew.ts         CrewCat + Hud + 공유 고양이 포즈 / 결정적 털색
+        src/rooms.ts        RoomId + 방별 범례 라벨/서브 + 범례 순서 + 별칭
+        src/socket.ts       WebSocket 클라이언트 (자동 재연결) + 프레임 타입
+        src/main.ts         소켓 핸들러, 범례, 상단 상태 표시, 렌더 루프
 
-## Screenshot
+## 아키텍처 메모
 
-Not captured in this environment: the sandbox blocks localhost HTTP for CLI/headless
-clients (TCP connects but no HTTP response), so Chrome headless could not load the page
-here. The production build transforms all modules cleanly and the server binds and
-reports ready; open **http://localhost:5280** in a normal browser to view. To capture
-one yourself once running:
+- **분류는 watcher가, web은 하지 않음.** web 클라이언트는 들은 방으로 고양이를 트윈시킬
+  뿐이에요. 방 로직은 전부 `roomMap.ts` / `roomState.ts`에 있어요.
+- **포커스 세션 하나 + 크루.** watcher는 "활성" 세션 하나를 깊게 따라 읽고(전체 이벤트
+  스트림 → 방, 말풍선, 활동 로그), 나머지는 꼬리만 엿봐서 크루를 채워요. 클라이언트는
+  `select` 프레임으로 포커스 세션을 바꿀 수 있어요(층 클릭).
+- **WebSocket 프레임** (`watcher/src/types.ts`, `web/src/socket.ts`에 미러링):
+  `catchup`(세션들 + 현재 방 + 히스토리), `event`(라이브 델타), `sessions`(층별 안내
+  갱신), `crew`(직원냥의 멤버별 방/상태), `ping`.
+- **안전성.** 로그 텍스트는 신뢰 불가: `parser.ts`에서 파싱/새니타이즈하고, `textContent`로만
+  렌더링하며, 길이를 제한하고, eval하지 않아요. 비밀값은 노출하지 않아요.
 
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-      --headless=new --window-size=1400,900 --virtual-time-budget=6000 \
-      --screenshot=docs/office-screenshot.png http://localhost:5280/
+## 크레딧
 
-## Credits
+3D 모델: Kenney, CC0. (Furniture / City / Food / Holiday / Commercial / Market 키트.
+`web/public/assets/` 아래 각 폴더의 `License.txt` 참고.)
+폰트: Paperlogy (눈누 / fonts-archive), 앱 전체에 적용.
 
-3D models: Kenney, CC0. (Furniture Kit + Car Kit; see the `License.txt` in each of
-`web/public/assets/furniture/` and `web/public/assets/vehicles/`.)
+## TODO (다음 이터레이션)
 
-## TODO (next iteration)
-
-PO executive-office interior + sub-agent elevator animation + further polish.
-(The sub-agent "elevator" arrival/departure animation is intentionally left as a clean
-stub — workflow activity is surfaced in the activity log only for now.)
+- **멀티세션 직원냥** — 동시에 돌아가는 각 top-level Kiro 세션을 저마다의 직원냥으로 동시에
+  표현하기(지금은 에이전트냥 한 마리가 가장 최근 세션만 따라감. 크루 고양이는 이미
+  워크플로우 서브에이전트 + 다른 세션을 커버함). 타당성 조사 결과 멀티 고양이 기계가 이미
+  있어서 단계적 **M** 규모로 결론 났어요. `.agents/tasks/multisession-crewcats-investigation.md`
+  참고.
+- 추가 3D 다듬기: 직원냥별 이름표, 방이 붐빌 때 말풍선 겹침 정리, 방별 고양이 정원과
+  "+N" 표시.

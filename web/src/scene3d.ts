@@ -78,9 +78,10 @@ const PROC_HEIGHT: Record<string, number> = {
 
 const CALICO: CatColors = { body: '#f3efe9', patchA: '#d98a4e', patchB: '#2a2622', muzzle: '#f3efe9', eye: '#2f4a38' };
 const BOSS_TABBY: CatColors = { body: '#b9bec6', patchA: '#8a929c', patchB: '#6f7782', muzzle: '#f6f3ee', eye: '#d79a2b' };
-// The founder (boss) cat: clean pure-white, soft off-white patches so it reads
-// tidy (not a blotchy tabby), warm amber eyes. Distinct from the calico agent cat.
-const BOSS_WHITE: CatColors = { body: '#fbfaf8', patchA: '#f1eee9', patchB: '#e7e2db', muzzle: '#fdfcfa', eye: '#8a6a3a' };
+// The founder (boss) cat: a pretty white-based cheese cat — creamy white body with
+// soft orange-marmalade patches (a white van-pattern ginger), cream muzzle, warm
+// amber eyes. Light and cute, clearly distinct from the calico agent.
+const BOSS_CHEESE: CatColors = { body: '#faf3e6', patchA: '#f0b865', patchB: '#e09a44', muzzle: '#fffaf0', eye: '#7a5a2a' };
 
 /** Chibi cat (~0.85 tall at scale 1, facing +z). The head (with eyes) and the
     two front paws are separate so poses can tilt, blink, wave and knead. */
@@ -1058,9 +1059,9 @@ export class Office3D {
       }
       case 'bossCat': {
         // The founder cat cycles through behaviours (roll on bed → sit & play →
-        // curl up & sleep). Built pure-white + crown/bow. `roll` is the pivot
-        // group the render loop animates per behaviour.
-        const parts = makeCat(BOSS_WHITE, true);
+        // curl up & sleep). Built as a cheese/orange tabby + crown/bow. `roll` is
+        // the pivot group the render loop animates per behaviour.
+        const parts = makeCat(BOSS_CHEESE, true);
         const { cat, tail } = parts;
         // boss accessories: a little gold crown + a pink bow tie
         const gold = mat('#f2c14e', 0.3, 0.5, '#f2c14e', 0.15);
@@ -1483,7 +1484,8 @@ export class Office3D {
       c.pos.copy(this.elevIn);
       c.root.rotation.y = this.elevatorYaw();
       c.holdUntil = performance.now() + 1300;
-      this.callElevator(3200, 'down');
+      // keep the doors open through the arrival + the (now longer) hello
+      this.callElevator(5200, 'down');
     } else c.pos.copy(DOOR);
     root.position.copy(c.pos);
     this.crew.set(m.id, c);
@@ -1510,12 +1512,14 @@ export class Office3D {
   private startGreeting(c: CrewCat, kind: 'hello' | 'bye', now: number): void {
     const elevator = c.viaElevator;
     c.greetStart = now;
-    c.greetUntil = now + 2300;
+    // Linger on the hello so the "안녕하세요! 저 ~ 담당이에요" moment reads clearly;
+    // the goodbye stays short so it doesn't hold up the elevator ride out.
+    c.greetUntil = now + (kind === 'hello' ? 4800 : 2300);
     if (kind === 'hello') c.greeted = true; else c.saidBye = true;
     // face the office: out of the elevator, or back in from the street door
     c.root.rotation.y = elevator ? this.elevatorYaw() : Math.PI;
     c.hud.show(kind === 'hello'
-      ? { mode: 'say', icon: '👋', title: elevator ? `안녕하세요! ${c.name} 담당이에요` : '안녕하세요! 출근했어요', since: Date.now() }
+      ? { mode: 'say', icon: '👋', title: elevator ? `안녕하세요! ${c.name} 담당이에요` : '안녕하세요! 출근했어요', sub: kind === 'hello' ? c.role : undefined, since: Date.now() }
       : { mode: 'say', icon: '🙇', title: '수고하셨습니다!', sub: elevator ? '먼저 올라가 볼게요' : '내일 봬요', since: Date.now() });
     if (kind === 'bye' && elevator) { this.callElevator(3200, 'up'); c.called = true; }
   }
@@ -1524,7 +1528,11 @@ export class Office3D {
     if (c.leaving) return;
     const short = m.name.length > 18 ? m.name.slice(0, 17) + '…' : m.name;
     c.name = short;
-    c.hud.setName(m.kind === 'workflow' ? `🧩 ${short}` : short);
+    // role line: for a workflow sub-agent cat, its workflow name (m.group); for a
+    // plain session cat, nothing. Shown under the name tag and in the hello bubble.
+    const roleRaw = m.kind === 'workflow' ? (m.group ?? '워크플로우') : '';
+    c.role = roleRaw.length > 22 ? roleRaw.slice(0, 21) + '…' : roleRaw;
+    c.hud.setName(m.kind === 'workflow' ? `서브냥 · ${short}` : short, c.role);
     if (m.status === 'idle') {
       if (c.state !== 'napping' && !(c.seat?.nap)) {
         const seat = this.claimSeat(c.id, undefined, true);

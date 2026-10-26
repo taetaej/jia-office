@@ -26,6 +26,8 @@ export class Hud {
   private readonly sub: HTMLDivElement;
   private readonly bubble: HTMLDivElement;
   private readonly tag: HTMLDivElement;
+  private readonly tagName: HTMLSpanElement;
+  private readonly tagRole: HTMLSpanElement;
   private state: { mode: BubbleMode; since: number; hideAt?: number } | null = null;
   private lastSec = -1;
 
@@ -43,7 +45,10 @@ export class Hud {
     this.sub = document.createElement('div'); this.sub.className = 'bubble-sub';
     this.bubble.append(head, this.sub);
     this.tag = document.createElement('div'); this.tag.className = 'cat-tag';
-    this.tag.textContent = name;
+    this.tagName = document.createElement('span'); this.tagName.className = 'cat-tag-name';
+    this.tagName.textContent = name;
+    this.tagRole = document.createElement('span'); this.tagRole.className = 'cat-tag-role';
+    this.tag.append(this.tagName, this.tagRole);
     this.el.append(this.bubble, this.tag);
     this.bubble.style.display = 'none';
     root.appendChild(this.el);
@@ -62,7 +67,11 @@ export class Hud {
     this.lastSec = -1;
   }
 
-  setName(name: string): void { this.tag.textContent = name; }
+  setName(name: string, role = ''): void {
+    this.tagName.textContent = name;
+    this.tagRole.textContent = role;
+    this.tagRole.style.display = role ? '' : 'none';
+  }
   setTagVisible(on: boolean): void { this.tag.style.display = on ? '' : 'none'; }
 
   /** Expire timed bubbles and tick the thinking counter. */
@@ -181,6 +190,8 @@ export class CrewCat {
   /** the bubble to go back to once a greeting is over */
   lastInfo: BubbleInfo | null = null;
   name = '';
+  /** short role/group line (e.g. the workflow name) shown under the name tag */
+  role = '';
   parts!: CatParts;
 
   constructor(
