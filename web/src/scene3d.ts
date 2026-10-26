@@ -610,11 +610,8 @@ export class Office3D {
         if (e.edge === 'W' && z.x === FLOOR.minX) continue;
         if (e.edge === 'S' && z.z + z.d === FLOOR.maxZ) continue;
         if (e.edge === 'E' && z.x + z.w === FLOOR.maxX) continue;
-        // 비서실: its back (north) edge faces open floor, not another room — no pane.
-        if (e.edge === 'N' && z.id === 'secretary') continue;
-        // founder: its east edge is now the shared interior line with 비서실, which the
-        // secretary's own W pane (+door) glazes — keep the founder front open as before.
-        if (e.edge === 'E' && z.id === 'founder') continue;
+        // 비서실 ↔ founder share one wall: the founder's west pane (with its door) glazes it.
+        if (e.edge === 'E' && z.id === 'secretary') continue;
         const along = e.edge === 'N' || e.edge === 'S' ? 'x' : 'z';
         const start = along === 'x' ? e.a[0] : e.a[1], end = along === 'x' ? e.b[0] : e.b[1];
         const fixed = along === 'x' ? e.a[1] : e.a[0];
@@ -1357,7 +1354,7 @@ export class Office3D {
     const np = document.createElement('div');
     np.className = 'nameplate'; np.textContent = 'JIA · Founder';
     this.labelRoot.appendChild(np);
-    this.labels.push({ zone: 'founder', el: np, world: new THREE.Vector3(f.x + 3.1, 1.75, f.z + 0.9), hoverOnly: false });
+    this.labels.push({ zone: 'founder', el: np, world: new THREE.Vector3(f.x + 2.2, 1.75, f.z + 0.9), hoverOnly: false });
   }
 
   // ---- public API -------------------------------------------------------------
@@ -1871,10 +1868,10 @@ export class Office3D {
     const from = this.bossMode === 'toBed' ? this.bossPos.clone() : this.bossHome.clone();
     this.bossPos.copy(from);
     this.bossPath = [
-      new THREE.Vector3(f.x + 6.3, 0, f.z + 4.3),
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.6),
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 0.6),
-      new THREE.Vector3(f.x + 3.1, 0.5, f.z + 0.88),
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 4.3),
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.4),
+      new THREE.Vector3(f.x + 3.3, 0, f.z + 0.65),
+      new THREE.Vector3(f.x + 2.2, 0.5, f.z + 0.88),
     ];
     this.bossMode = 'toDesk';
     this.bossPhase = '';
@@ -1888,7 +1885,7 @@ export class Office3D {
   /** The approval came back: stamp it (or not), then go back to the bed. */
   bossVerdict(approved: boolean): void {
     if (!this.boss || this.bossMode === 'play' || this.bossMode === 'toBed') return;
-    if (this.bossMode === 'toDesk') { this.bossPath = []; this.bossPos.set(zoneById('founder')!.x + 3.1, 0.5, zoneById('founder')!.z + 0.88); }
+    if (this.bossMode === 'toDesk') { this.bossPath = []; this.bossPos.set(zoneById('founder')!.x + 2.2, 0.5, zoneById('founder')!.z + 0.88); }
     this.bossMode = 'stamp';
     this.bossUntil = performance.now() + 2800;
     this.ensureStamp();
@@ -1908,9 +1905,9 @@ export class Office3D {
   private bossBackToBed(): void {
     const f = zoneById('founder')!;
     this.bossPath = [
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 0.6),
-      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.6),
-      new THREE.Vector3(f.x + 6.3, 0, f.z + 4.3),
+      new THREE.Vector3(f.x + 3.3, 0, f.z + 0.65),
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 2.4),
+      new THREE.Vector3(f.x + 4.3, 0, f.z + 4.3),
       this.bossHome!.clone(),
     ];
     this.bossMode = 'toBed';
@@ -1922,7 +1919,7 @@ export class Office3D {
     if (this.stamp) { this.stamp.root.visible = true; return; }
     const f = zoneById('founder')!;
     const root = new THREE.Group();
-    root.position.set(f.x + 3.1, 0.755, f.z + 1.35);
+    root.position.set(f.x + 2.2, 0.755, f.z + 1.35);
     const paper = mesh(new THREE.BoxGeometry(0.34, 0.004, 0.46), mat('#ffffff', 0.9), 0, 0.002, 0, false);
     for (let i = 0; i < 4; i++) paper.add(mesh(new THREE.BoxGeometry(0.24, 0.002, 0.015), mat('#c9ced6', 0.9), -0.02, 0.003, -0.15 + i * 0.06, false));
     const seal = mesh(new THREE.TorusGeometry(0.06, 0.012, 6, 24), mat('#e0453a', 0.6, 0, '#e0453a', 0.2), 0.07, 0.006, 0.12, false);
@@ -1996,12 +1993,13 @@ export class Office3D {
   }
 
   // ---- secretary cat (비서냥): fixed desk worker in 비서실 ------------------
+  private static readonly SECRETARY_SEAT_Y = 0.5;
   private buildSecretary(): void {
     const z = zoneById('secretary');
     if (!z) return; // zone not found — safe no-op
 
-    const { cat, tail } = makeCat(SECRETARY_GREY);
-    const parts = { ...makeCat(SECRETARY_GREY), cat, tail };
+    const parts = makeCat(SECRETARY_GREY);
+    const { cat } = parts;
 
     // glasses: two small lens rings parented to the cat head, boss-accessory style
     const glassMat = new THREE.MeshStandardMaterial({ color: '#2b2e35', roughness: 0.6, metalness: 0.3 });
@@ -2024,11 +2022,10 @@ export class Office3D {
     root.add(cat);
     root.scale.setScalar(0.85);
 
-    // seat spot is the last route point; place the secretary there
+    // the last route point is her desk chair: sit there, facing the doors (south)
     const seat = z.route?.at(-1) ?? [z.x + z.w / 2, z.z + z.d / 2];
-    root.position.set(seat[0], 0, seat[1]);
-    // face west (toward the founder office entrance)
-    root.rotation.y = -Math.PI / 2;
+    root.position.set(seat[0], Office3D.SECRETARY_SEAT_Y, seat[1]);
+    root.rotation.y = 0;
 
     this.scene.add(root);
     this.secretary = { root, parts };
@@ -2092,12 +2089,13 @@ export class Office3D {
 
     // idle: gentle typing bob + blink
     const t = now * 0.001;
+    resetPose(s.parts);
     s.parts.head.rotation.z = Math.sin(t * 0.9) * 0.03;
-    if (Math.random() < dt * 0.3) blink(s.parts);
+    blink(s.parts, now, 3);
 
     // alert mode: light bob to show urgency
     if (this.secretaryMode === 'alert') {
-      s.root.position.y = Math.abs(Math.sin(t * 3.5)) * 0.04;
+      s.root.position.y = Office3D.SECRETARY_SEAT_Y + Math.abs(Math.sin(t * 3.5)) * 0.04;
       // escalate after threshold
       if (!this.secretaryEscalated && Date.now() > this.secretaryEscalateAt) {
         this.secretaryEscalated = true;
@@ -2108,7 +2106,7 @@ export class Office3D {
         this.secretaryHud.setEscalated(true);
       }
     } else {
-      s.root.position.y = 0;
+      s.root.position.y = Office3D.SECRETARY_SEAT_Y;
       // relax bubble expires
       if (this.secretaryMode === 'relax' && performance.now() > this.secretaryUntil) {
         this.secretaryMode = 'idle';

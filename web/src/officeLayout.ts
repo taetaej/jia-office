@@ -17,9 +17,7 @@ export const KIT_BASE = { furniture: KIT_SCALE, food: 0.4, holiday: 0.8, platfor
 export type Kit = keyof typeof KIT_BASE;
 
 export const FLOOR = {
-  // maxX widened 28 → 31 to add the 비서실 (secretary office) along the new east
-  // edge next to Jia's Office (user-sanctioned: "사무실을 더 넓혀서라도").
-  minX: 0, maxX: 31, minZ: 0, maxZ: 20,
+  minX: 0, maxX: 28, minZ: 0, maxZ: 20,
   thickness: 0.3,
   center: { x: 14, z: 10 },
 } as const;
@@ -502,60 +500,49 @@ export const ZONES: ZoneDef[] = [
     ],
   },
   {
-    id: 'founder', room: 'founder', label: "Jia's Office · FOUNDER",
-    x: 19, z: 14, w: 9, d: 6, floor: '#f2ebe1', enclosure: 'glass',
+    // 비서실: an anteroom in front of the founder's door. Visitors come off
+    // corridor2 through its west door and on into Jia's Office through the east one.
+    id: 'secretary', room: 'secretary', label: '비서실 · SECRETARY',
+    x: 19, z: 14, w: 2.5, d: 6, floor: '#eef0f3', enclosure: 'glass',
     door: { edge: 'W', at: 3.2 },
-    route: [[CORRIDOR2_X, CORRIDOR_Z], [CORRIDOR2_X, 17.2], [19.8, 17.2], [21.6, 17.6]],
+    // the last point is the secretary's chair (buildSecretary seats her there)
+    route: [[CORRIDOR2_X, CORRIDOR_Z], [CORRIDOR2_X, 17.2], [20.25, 14.78]],
     furniture: [
-      // executive desk: the founder looks S into the room
-      ...workstation(3.1, 1.5, 'S', { monitors: 2, extra: 'lava', lavaColor: PALETTE.hotPink, chair: PALETTE.hotPink }),
-      { asset: 'coatRackStanding', rx: 0.45, rz: 0.45 },
-      ...filledBookcase(5.5, 0.27, 'S'),
-      ...filledBookcase(6.35, 0.27, 'S'),
-      { asset: 'trophy', rx: 7.2, rz: 0.3 },
-      // the boss cat's bed: it rolls around on it all day
-      { asset: 'rugMint', rx: 7.3, rz: 3.95, face: 'E' },
-      { asset: 'bedDouble', rx: 7.4, rz: 3.95, face: 'S' },
-      { asset: 'bossCat', rx: 7.4, rz: 4.3, y: 0.42 },
-      // small lounge + the mascot's cat bed + cat tower
-      { asset: 'loungeChair', rx: 3.45, rz: 4.4, face: 'E', tint: { carpet: PALETTE.butter } },
-      { asset: 'loungeChair', rx: 5.75, rz: 4.4, face: 'W', tint: { carpet: PALETTE.pink } },
-      { asset: 'tableCoffee', rx: 4.6, rz: 4.4 },
-      { asset: 'cupcake', rx: 4.6, rz: 4.35, on: 'tableCoffee' },
-      { asset: 'catBed', rx: 2.0, rz: 4.6 },
-      { asset: 'catTree', rx: 0.6, rz: 3.2 },
-      { asset: 'pottedPlantPink', rx: 8.55, rz: 0.45 },
-      { asset: 'pottedPlantButter', rx: 8.55, rz: 5.55 },
-      { asset: 'plantSmall2', rx: 0.4, rz: 5.6 },
+      // she faces the doors, so every visitor passes her desk
+      ...workstation(1.25, 1.4, 'S', { monitors: 1, chair: PALETTE.navy, extra: 'mug' }),
+      // two waiting chairs for visitors
+      { asset: 'chair', rx: 0.75, rz: 5.3, face: 'N', tint: { wood: PALETTE.lilac } },
+      { asset: 'chair', rx: 1.75, rz: 5.3, face: 'N', tint: { wood: PALETTE.lilac } },
+      { asset: 'pottedPlantMint', rx: 2.15, rz: 0.4 },
+      { asset: 'plantSmall1', rx: 0.35, rz: 5.6 },
     ],
   },
   {
-    // 비서실 (secretary office): a glass-walled strip on the NEW east edge
-    // (x28–31), sharing the z-span and glass wall-line of the founder office so
-    // it sits right next to Jia's Office. World range x:28–31, z:14–20 — touches
-    // founder/test only along shared edges, never overlapping (see design §1.3).
-    id: 'secretary', room: 'secretary', label: '비서실 · SECRETARY',
-    x: 28, z: 14, w: 3.0, d: 6, floor: '#eef0f3', enclosure: 'glass',
-    // door on the WEST edge (toward corridor2 / founder side)
+    id: 'founder', room: 'founder', label: "Jia's Office · FOUNDER",
+    x: 21.5, z: 14, w: 6.5, d: 6, floor: '#f2ebe1', enclosure: 'glass',
+    // the only way in is through 비서실
     door: { edge: 'W', at: 3.2 },
-    // A genuinely walkable corridor2 → open-front band → W-door → seat path that
-    // stays in the secretary x-band (x≥28) and never enters the founder interior.
-    // Only the LAST point is consumed (buildSecretary places the cat statically);
-    // the secretary never walks, so the rest documents a correct-if-traversed route.
-    route: [
-      [CORRIDOR2_X, CORRIDOR_Z], // 18, 8.25  (on the main corridor line)
-      [CORRIDOR2_X, 19.4],       // 18, 19.4  (down corridor2 to the open front band, < maxZ=20)
-      [28.6, 19.4],              // 28.6,19.4 (east across the open front band, in front of 비서실)
-      [28.6, 17.2],              // 28.6,17.2 (up to the W door opening at world z=14+3.2=17.2)
-      [29.5, 15.6],              // 29.5,15.6 (the secretary's standing/seat spot — the only consumed point)
-    ],
+    route: [[CORRIDOR2_X, CORRIDOR_Z], [CORRIDOR2_X, 17.2], [20.25, 17.2], [22.6, 17.2], [22.6, 16.9]],
     furniture: [
-      // the secretary looks WEST (toward the founder glass / 사장님) so her
-      // attention bubble reads toward the boss office.
-      ...workstation(1.2, 1.6, 'W', { monitors: 1, chair: PALETTE.navy }),
-      // decor only — plants are exempt from the tall-in-front verifier rule
-      { asset: 'pottedPlantMint', rx: 2.4, rz: 0.5 },
-      { asset: 'plantSmall1', rx: 2.4, rz: 5.5 },
+      // executive desk: the founder looks S into the room
+      ...workstation(2.2, 1.5, 'S', { monitors: 2, extra: 'lava', lavaColor: PALETTE.hotPink, chair: PALETTE.hotPink }),
+      { asset: 'coatRackStanding', rx: 0.45, rz: 0.45 },
+      ...filledBookcase(3.6, 0.27, 'S'),
+      ...filledBookcase(4.45, 0.27, 'S'),
+      { asset: 'trophy', rx: 5.3, rz: 0.3 },
+      { asset: 'catTree', rx: 6.0, rz: 1.5 },
+      // the boss cat's bed: it naps, grooms and rolls around on it all day
+      { asset: 'rugMint', rx: 5.3, rz: 3.95, face: 'E' },
+      { asset: 'bedDouble', rx: 5.4, rz: 3.95, face: 'S' },
+      { asset: 'bossCat', rx: 5.4, rz: 4.3, y: 0.42 },
+      // small lounge
+      { asset: 'loungeChair', rx: 1.3, rz: 4.4, face: 'E', tint: { carpet: PALETTE.butter } },
+      { asset: 'loungeChair', rx: 3.5, rz: 4.4, face: 'W', tint: { carpet: PALETTE.pink } },
+      { asset: 'tableCoffee', rx: 2.4, rz: 4.4 },
+      { asset: 'cupcake', rx: 2.4, rz: 4.35, on: 'tableCoffee' },
+      { asset: 'pottedPlantPink', rx: 6.05, rz: 0.45 },
+      { asset: 'pottedPlantButter', rx: 6.05, rz: 5.55 },
+      { asset: 'plantSmall2', rx: 0.4, rz: 5.6 },
     ],
   },
 ];
