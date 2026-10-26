@@ -9,7 +9,7 @@ import { N8AOPostPass } from 'n8ao';
 import { type RoomId, resolveRoom } from './rooms.js';
 import { ModelLoader, tintMeshes } from './models.js';
 import { CrewCat, Hud, blink, closeEyes, coatFor, greetPose, resetPose, sleepPose, type BubbleInfo, type CatColors, type CatParts, type Seat } from './crew.js';
-import type { CrewMember } from './socket.js';
+import type { CrewMember, Source } from './socket.js';
 export type { BubbleInfo } from './crew.js';
 import {
   ASSET, CAMERA, CORRIDOR2_X, CORRIDOR_Z, FLOOR, GLASS, KIT_SCALE, LIGHTING, MATERIAL_DEFAULTS,
@@ -78,6 +78,8 @@ const PROC_HEIGHT: Record<string, number> = {
 
 const CALICO: CatColors = { body: '#f3efe9', patchA: '#d98a4e', patchB: '#2a2622', muzzle: '#f3efe9', eye: '#2f4a38' };
 // Claude Code sessions get a Claude-orange tabby as their agent cat.
+// Codex sessions: a crisp black-and-white tuxedo.
+const CODEX_TUXEDO: CatColors = { body: '#2f3237', patchA: '#25282c', patchB: '#f4f2ee', muzzle: '#f7f6f3', eye: '#7fd1a8' };
 const CLAUDE_ORANGE: CatColors = { body: '#e8946f', patchA: '#d97757', patchB: '#f6dccd', muzzle: '#fbeee6', eye: '#3b2f2a' };
 const BOSS_TABBY: CatColors = { body: '#b9bec6', patchA: '#8a929c', patchB: '#6f7782', muzzle: '#f6f3ee', eye: '#d79a2b' };
 // The founder (boss) cat: a pretty white-based cheese cat — creamy white body with
@@ -1423,19 +1425,20 @@ export class Office3D {
   }
 
   /** The name tag under the bubble (e.g. the session name). */
-  /** Kiro sessions are watched by the calico; Claude Code sessions by an orange tabby. */
-  setAgentSource(source: 'kiro' | 'claude'): void {
+  /** Kiro sessions are watched by the calico, Claude Code by an orange tabby, Codex by a tuxedo. */
+  setAgentSource(source: Source): void {
     if (this.agentSource === source) return;
     this.agentSource = source;
     this.character.remove(this.catBody);
-    const parts = makeCat(source === 'claude' ? CLAUDE_ORANGE : CALICO);
+    const parts = makeCat(source === 'claude' ? CLAUDE_ORANGE : source === 'codex' ? CODEX_TUXEDO : CALICO);
     this.agentParts = parts;
     this.catBody = parts.cat;
     this.catTail = parts.tail;
     this.character.add(parts.cat);
     this.agentHud.el.classList.toggle('src-claude', source === 'claude');
+    this.agentHud.el.classList.toggle('src-codex', source === 'codex');
   }
-  private agentSource: 'kiro' | 'claude' = 'kiro';
+  private agentSource: Source = 'kiro';
 
   setAgentName(name: string): void {
     this.agentHud.setName(name);
@@ -1564,7 +1567,7 @@ export class Office3D {
     root.scale.setScalar(0.01);
     this.scene.add(root);
     const hud = new Hud(this.labelRoot, '', 'crew');
-    if (m.source === 'claude') hud.el.classList.add('src-claude');
+    if (m.source === 'claude' || m.source === 'codex') hud.el.classList.add(`src-${m.source}`);
     const c = Object.assign(new CrewCat(m.id, root, cat, tail, hud), { spawnAt: performance.now() });
     c.parts = parts;
     if (this.elev) {

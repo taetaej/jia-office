@@ -11,10 +11,11 @@
 
 import { promises as fsp } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ActivityEvent, SessionInfo } from './types.js';
 import { parseLine, sanitize } from './parser.js';
 import type { ClassifyOptions, RawPayload } from './roomMap.js';
+import { CODEX_PREFIX, parseCodexLine } from './codex.js';
 
 export const CLAUDE_PREFIX = 'cc_';
 /** Only list Claude sessions touched in the last two weeks. */
@@ -153,6 +154,53 @@ export function parseClaudeLine(line: string, sessionId: string, receiveTime: nu
 
 // ---- discovery -----------------------------------------------------------------
 const titleCache = new Map<string, { mtime: number; title: string }>();
+const projectCache = new Map<string, { at: number; project: string }>();
+
+/** The git repository containing `dir` (so `cd web/src` still reads as the project), else `dir`. */
+async function repoRoot(dir: string): Promise<string> {
+  let d = dir;
+  for (let i = 0; i < 8 && d && d !== dirname(d); i++, d = dirname(d)) {
+    try { await fsp.stat(join(d, '.git')); return d; } catch { /* keep climbing */ }
+  }
+  return dir;
+}
+
+/** Claude Code names each project folder after its path with every non-alphanumeric → '-'. */
+const encodeDir = (p: string): string => p.replace(/[^a-zA-Z0-9]/g, '-');
+
+/** The project folder. Shell `cd`s change the recorded `cwd`, so prefer the cwd
+    that matches the transcript's project folder name; else the latest folder,
+    lifted to its shortest recently seen parent.
+    Re-read at most every 30s (a session can move to another folder midway). */
+async function readProject(path: string, dirName: string): Promise<string | undefined> {
+  const cached = projectCache.get(path);
+  if (cached && Date.now() - cached.at < 30_000) return cached.project;
+  let cwd = '';
+  try {
+    const fh = await fsp.open(path, 'r');
+    try {
+      const { size } = await fh.stat();
+      const find = async (start: number, len: number, last: boolean) => {
+        const buf = Buffer.alloc(Math.min(len, size - start));
+        const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+        const all = [...buf.subarray(0, bytesRead).toString('utf8').matchAll(/"cwd":"((?:[^"\\]|\\.)*)"/g)]
+          .map((m) => JSON.parse(`"${m[1]}"`) as string);
+        const root = all.find((c) => encodeDir(c) === dirName);
+        if (root || !all.length) return root ?? '';
+        // `cd web/src` & co: the shortest recent cwd that contains the latest one
+        const pick = last ? all.at(-1)! : all[0];
+        return all.filter((c) => pick === c || pick.startsWith(c + '/')).sort((x, y) => x.length - y.length)[0] ?? pick;
+      };
+      cwd = (await find(Math.max(0, size - 512 * 1024), 512 * 1024, true)) || (await find(0, 2 * 1024 * 1024, false));
+    } finally {
+      await fh.close();
+    }
+  } catch { /* unreadable */ }
+  if (!cwd) return cached?.project;
+  const project = sanitize(basename(await repoRoot(cwd)), 40);
+  projectCache.set(path, { at: Date.now(), project });
+  return project;
+}
 
 /** The session's title: Claude Code's custom/agent title, else its first prompt. */
 async function readTitle(path: string, mtime: number): Promise<string> {
@@ -235,6 +283,7 @@ export async function discoverClaudeSessions(): Promise<SessionInfo[]> {
         sessionId: CLAUDE_PREFIX + uuid,
         shortId: uuid.slice(0, 8),
         name: await readTitle(path, mtime),
+        project: await readProject(path, dir),
         hash: dir,
         lastActivity: mtime,
         source: 'claude',
@@ -244,9 +293,10 @@ export async function discoverClaudeSessions(): Promise<SessionInfo[]> {
   return out;
 }
 
-/** Parse a line from either source (Claude sessions carry the cc_ prefix). */
+/** Parse a line from any source (Claude sessions carry cc_, Codex cx_). */
 export function parseAny(line: string, sessionId: string, receiveTime: number, opts: ClassifyOptions = {}): ActivityEvent[] {
   if (sessionId.startsWith(CLAUDE_PREFIX)) return parseClaudeLine(line, sessionId, receiveTime, opts);
+  if (sessionId.startsWith(CODEX_PREFIX)) return parseCodexLine(line, sessionId, receiveTime, opts);
   const ev = parseLine(line, sessionId, receiveTime, opts);
   return ev ? [ev] : [];
 }

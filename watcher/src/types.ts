@@ -58,7 +58,7 @@ export interface CrewMember {
   id: string;
   kind: 'workflow' | 'session';
   /** where the member's session comes from */
-  source?: 'kiro' | 'claude';
+  source?: 'kiro' | 'claude' | 'codex';
   /** display name: the sub-agent name or the session title. */
   name: string;
   /** workflow name, for workflow members. */
@@ -85,8 +85,10 @@ export interface SessionInfo {
   /** Last-activity epoch ms (file mtime of messages.jsonl). For a top-level
       session this includes its workflow sub-agents' activity. */
   lastActivity: number;
+  /** The project folder the session works in (its basename), when known. */
+  project?: string;
   /** Where the session comes from (default: Kiro). */
-  source?: 'kiro' | 'claude';
+  source?: 'kiro' | 'claude' | 'codex';
   /** Set on workflow sub-agent sessions: the session that ran the workflow. */
   parentId?: string;
   /** Sub-agents: the workflow step (node id, e.g. "plan", "code"). */
@@ -102,10 +104,10 @@ export interface Approval {
   /** who is waiting: the session title, or the workflow step name */
   who: string;
   kind: 'main' | 'workflow' | 'session';
-  source: 'kiro' | 'claude';
+  source: 'kiro' | 'claude' | 'codex';
   question: string;
   since: number;
-  /** Claude Code: guessed from a tool call with no result yet (permission prompts aren't logged) */
+  /** Claude Code / Codex: guessed from a tool call with no result yet (permission prompts aren't logged) */
   inferred?: boolean;
 }
 

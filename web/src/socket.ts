@@ -19,7 +19,7 @@ export interface ActivityEvent {
 export interface CrewMember {
   id: string;
   kind: 'workflow' | 'session';
-  source?: 'kiro' | 'claude';
+  source?: Source;
   name: string;
   group?: string;
   status: 'working' | 'idle' | 'done';
@@ -29,12 +29,18 @@ export interface CrewMember {
   tool?: string;
   since: number;
 }
+/** Where a session comes from. */
+export type Source = 'kiro' | 'claude' | 'codex';
+export const SOURCE_LABEL: Record<Source, string> = { kiro: 'Kiro', claude: 'Claude', codex: 'Codex' };
+/** The main agent cat's name per source. */
+export const AGENT_NAME: Record<Source, string> = { kiro: '에이전트냥', claude: '클로드냥', codex: '코덱스냥' };
+
 /** Someone waiting on the user to approve something (see watcher types). */
 export interface Approval {
   id: string;
   who: string;
   kind: 'main' | 'workflow' | 'session';
-  source: 'kiro' | 'claude';
+  source: Source;
   question: string;
   since: number;
   inferred?: boolean;
@@ -45,8 +51,10 @@ export interface SessionInfo {
   name: string;
   hash: string;
   lastActivity: number;
+  /** the project folder the session works in, when known */
+  project?: string;
   /** where the session comes from (default: Kiro) */
-  source?: 'kiro' | 'claude';
+  source?: Source;
 }
 export type ServerFrame =
   | { v: 1; type: 'catchup'; sessionId: string; sessions: SessionInfo[]; liveSessionId: string | null; currentRoom: string; events: ActivityEvent[] }

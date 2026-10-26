@@ -9,7 +9,7 @@
 // SECURITY: every log-derived string is set with textContent only.
 
 import { ROOMS, resolveRoom, type RoomId } from './rooms.js';
-import type { ActivityEvent } from './socket.js';
+import { SOURCE_LABEL, type ActivityEvent, type Source } from './socket.js';
 
 // ---- categories ----------------------------------------------------------------
 export type Category =
@@ -139,7 +139,7 @@ export class ActivityLog {
   /** cards whose raw event list is shown */
   private rawOpen = new Set<string>();
   /** where the watched session comes from: shown as a badge on every card */
-  source: 'kiro' | 'claude' = 'kiro';
+  source: Source = 'kiro';
 
   constructor(private readonly list: HTMLElement, private readonly filter: LogFilter) {}
 
@@ -332,7 +332,7 @@ export class ActivityLog {
     meta.dataset.cardId = c.id;
     const src = document.createElement('span');
     src.className = `src-badge ${this.source}`;
-    src.textContent = this.source === 'claude' ? 'Claude' : 'Kiro';
+    src.textContent = SOURCE_LABEL[this.source];
     head.append(status, title, src, meta);
     head.addEventListener('click', () => {
       if (this.toggled.has(c.id)) this.toggled.delete(c.id); else this.toggled.add(c.id);

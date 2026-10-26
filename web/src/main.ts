@@ -4,7 +4,7 @@
 
 import { ROOMS, ROOM_ORDER, resolveRoom, type RoomId } from './rooms.js';
 import { Office3D, type BubbleInfo } from './scene3d.js';
-import { OfficeSocket, type ActivityEvent, type Approval, type SessionInfo } from './socket.js';
+import { AGENT_NAME, OfficeSocket, SOURCE_LABEL, type ActivityEvent, type Approval, type SessionInfo } from './socket.js';
 import { ActivityLog, CATEGORY, type Category, type LogFilter } from './activityLog.js';
 import { ApprovalAlerts, loadAlertSettings, saveAlertSettings } from './alerts.js';
 
@@ -159,22 +159,24 @@ function renderFloors(): void {
   for (const s of sessions) {
     const li = document.createElement('li');
     li.className = 'floor-item' + (s.sessionId === activeSessionId ? ' active' : '');
-    const short = document.createElement('span');
-    short.className = 'floor-short';
-    short.textContent = s.shortId;
+    li.title = `${s.name}\n${s.shortId}`; // untrusted → attribute text only
     const main = document.createElement('div');
     main.className = 'floor-main';
     const name = document.createElement('div');
     name.className = 'floor-name';
-    const src = document.createElement('span');
-    src.className = `src-badge floor-src ${s.source ?? 'kiro'}`;
-    src.textContent = s.source === 'claude' ? 'Claude' : 'Kiro';
-    name.append(src, s.name); // untrusted -> text node
+    name.textContent = s.name; // untrusted -> textContent
+    // badge · project · when
     const meta = document.createElement('div');
     meta.className = 'floor-meta';
-    meta.textContent = `${s.hash.slice(0, 6)} · ${relativeTime(s.lastActivity)}`;
+    const src = document.createElement('span');
+    src.className = `src-badge ${s.source ?? 'kiro'}`;
+    src.textContent = SOURCE_LABEL[s.source ?? 'kiro'];
+    const where = document.createElement('span');
+    where.className = 'floor-where';
+    where.textContent = [s.project, relativeTime(s.lastActivity)].filter(Boolean).join(' · ');
+    meta.append(src, where);
     main.append(name, meta);
-    li.append(short, main);
+    li.append(main);
     if (s.sessionId === liveSessionId) {
       const dot = document.createElement('span');
       dot.className = 'floor-live';
@@ -345,7 +347,7 @@ const socket = new OfficeSocket({
     for (const ev of f.events) log.add(ev);
     renderLog();
     sessionNameEl.textContent = active ? active.name : '세션';
-    const agentName = active?.source === 'claude' ? '클로드냥' : '에이전트냥';
+    const agentName = AGENT_NAME[active?.source ?? 'kiro'];
     office.setAgentSource(active?.source ?? 'kiro');
     office.setAgentName(active ? `${agentName} · ${active.name}` : agentName);
     // restore the bubble from recent history (an old, finished session stays quiet)

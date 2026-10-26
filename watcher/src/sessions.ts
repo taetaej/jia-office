@@ -5,9 +5,10 @@
 
 import { createReadStream, promises as fsp } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { SessionInfo } from './types.js';
 import { claudePath, discoverClaudeSessions } from './claude.js';
+import { codexPath, discoverCodexSessions } from './codex.js';
 
 export function sessionsRoot(): string {
   return join(homedir(), '.kiro', 'sessions');
@@ -46,11 +47,12 @@ export async function discoverSessions(): Promise<SessionInfo[]> {
       } catch {
         continue; // no messages.jsonl -> skip
       }
-      const name = await readTitle(join(hashDir, sessionId, 'session.json'), hash);
+      const { name, project } = await readMeta(join(hashDir, sessionId, 'session.json'), hash);
       out.push({
         sessionId,
         shortId: sessionId.replace(/^sess_/, '').slice(0, 8),
         name,
+        project,
         hash,
         lastActivity: mtime,
         source: 'kiro',
@@ -59,6 +61,7 @@ export async function discoverSessions(): Promise<SessionInfo[]> {
     }
   }
   out.push(...(await discoverClaudeSessions()));
+  out.push(...(await discoverCodexSessions()));
   // A workflow keeps its parent busy: sub-agent activity counts as the parent's.
   const byId = new Map(out.map((s) => [s.sessionId, s]));
   for (const s of out) {
@@ -100,19 +103,23 @@ async function workflowSessions(hashDir: string): Promise<Map<string, Pick<Sessi
   return out;
 }
 
-async function readTitle(sessionJsonPath: string, fallbackHash: string): Promise<string> {
+/** Title and project folder from a Kiro session.json. */
+async function readMeta(sessionJsonPath: string, fallbackHash: string): Promise<{ name: string; project?: string }> {
   try {
     const raw = await fsp.readFile(sessionJsonPath, 'utf8');
-    const obj = JSON.parse(raw) as { title?: unknown };
-    if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim().slice(0, 60);
+    const obj = JSON.parse(raw) as { title?: unknown; workspacePaths?: unknown };
+    const ws = Array.isArray(obj.workspacePaths) && typeof obj.workspacePaths[0] === 'string' ? obj.workspacePaths[0] : '';
+    const project = ws ? basename(ws).slice(0, 40) : undefined;
+    const name = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim().slice(0, 60) : `session ${fallbackHash.slice(0, 6)}`;
+    return { name, project };
   } catch {
-    /* ignore */
+    return { name: `session ${fallbackHash.slice(0, 6)}` };
   }
-  return `session ${fallbackHash.slice(0, 6)}`;
 }
 
 export function messagesPath(root: string, info: SessionInfo): string {
   if (info.source === 'claude') return claudePath(info);
+  if (info.source === 'codex') return codexPath(info);
   return join(root, info.hash, info.sessionId, 'messages.jsonl');
 }
 

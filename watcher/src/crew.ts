@@ -55,8 +55,8 @@ async function readTail(path: string, bytes: number): Promise<string[] | null> {
   }
 }
 
-/** Claude transcripts are mostly large bookkeeping lines, so read a deeper tail. */
-const tailBytes = (info: SessionInfo) => (info.source === 'claude' ? 1024 * 1024 : TAIL_BYTES);
+/** Claude/Codex transcripts are mostly large bookkeeping lines, so read a deeper tail. */
+const tailBytes = (info: SessionInfo) => (info.source === 'claude' || info.source === 'codex' ? 1024 * 1024 : TAIL_BYTES);
 
 async function peekSession(root: string, info: SessionInfo): Promise<Peek | null> {
   const path = messagesPath(root, info);
@@ -213,7 +213,7 @@ export async function computeApprovals(root: string, sessions: SessionInfo[], ac
     if (peek.state.mode === 'waiting') {
       out.push({ ...base, question: peek.state.detail || '승인이 필요해요', since: peek.state.since });
     } else if (
-      s.source === 'claude' && peek.openCall
+      (s.source === 'claude' || s.source === 'codex') && peek.openCall
       && now - peek.openCall.since > INFER_AFTER_MS
       && now - s.lastActivity > INFER_AFTER_MS && now - s.lastActivity < INFER_WINDOW_MS
     ) {

@@ -3,7 +3,7 @@
 // the office, camera on the waiting cat), a flashing tab title while anything is
 // waiting, and a short two-tone chime. All three are user toggles.
 
-import type { Approval } from './socket.js';
+import { AGENT_NAME, SOURCE_LABEL, type Approval } from './socket.js';
 
 export interface AlertSettings {
   desktop: boolean;
@@ -63,7 +63,7 @@ export class ApprovalAlerts {
   }
 
   private notify(a: Approval): void {
-    const who = a.kind === 'main' ? `에이전트 · ${a.who}` : a.kind === 'workflow' ? `서브냥 · ${a.who}` : a.who;
+    const who = a.kind === 'main' ? `${AGENT_NAME[a.source]} · ${a.who}` : a.kind === 'workflow' ? `서브냥 · ${a.who}` : `${SOURCE_LABEL[a.source]} · ${a.who}`;
     const n = new Notification(a.inferred ? '🕵️ 허용을 기다리는 것 같아요' : '🔔 결재 대기', {
       body: `${who}\n${a.question}`, // textual only — the OS renders it as plain text
       tag: a.id,
