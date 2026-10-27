@@ -8,6 +8,8 @@
 //     the last ~50 events + the computed current room, then stream live deltas.
 //  5. Surface workflow status changes in the activity log only.
 
+import { utimesSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import chokidar from 'chokidar';
 import type { ActivityEvent, Approval, ClientFrame, CrewMember, ServerFrame, SessionInfo } from './types.js';
@@ -29,6 +31,8 @@ const CATCHUP_EVENTS = 400;
 const RECENT_TURNS = 3;
 const MAX_REPLAY_LINES = 20_000;
 const POLL_MS = 350; // within the 0.25–0.5s live-delta budget
+/** A poll this old is wedged (fs calls that never return), not just slow. */
+const STALL_MS = 60_000;
 const CAPACITY = 1200;
 
 function clampPort(raw: string | undefined, fallback: number): number {
@@ -253,9 +257,35 @@ async function main(): Promise<void> {
     /* chokidar is best-effort; the interval poll is authoritative */
   }
   await poll();
+  // One poll at a time; if one never finishes the office silently freezes on a
+  // stale session list, so restart instead.
+  let polling = false;
+  let pollStartedAt = 0;
   setInterval(() => {
-    poll().catch((e) => console.error('[watcher] poll error:', e));
+    if (polling) {
+      if (Date.now() - pollStartedAt > STALL_MS) restartStalled();
+      return;
+    }
+    polling = true;
+    pollStartedAt = Date.now();
+    poll()
+      .catch((e) => console.error('[watcher] poll error:', e))
+      .finally(() => { polling = false; });
   }, POLL_MS);
+}
+
+/** Nothing recovers a wedged fs pool in-process. Under `tsx watch`, touching this
+    file makes it reload us cleanly; a plain `tsx` run just exits. */
+let restarting = false;
+function restartStalled(): void {
+  if (restarting) return;
+  restarting = true;
+  console.error(`[watcher] poll stalled for ${STALL_MS / 1000}s — restarting`);
+  try {
+    const now = new Date();
+    utimesSync(fileURLToPath(import.meta.url), now, now);
+  } catch { /* not running from source */ }
+  setTimeout(() => process.exit(1), 5_000);
 }
 
 main().catch((e) => {
