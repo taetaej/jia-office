@@ -2200,6 +2200,37 @@ export class Office3D {
     }
   }
 
+  // ---- snacks (간식비) ------------------------------------------------------------
+  private snacks: Array<{ el: HTMLElement; id: string | null; t0: number }> = [];
+  /** A cat just ate some 츄르: "+🐟 N" floats up over it and fades. `id` is a
+      crew member's session id, or null for the main agent. */
+  snack(id: string | null, amount: number): void {
+    if (id && !this.crew.has(id)) return;
+    if (this.snacks.length > 12) return;
+    const el = document.createElement('div');
+    el.className = 'snack-pop';
+    el.textContent = `+🐟 ${amount}`;
+    el.style.transform = 'translate(-9999px,-9999px)'; // placed on the next rendered frame
+    this.labelRoot.appendChild(el);
+    this.snacks.push({ el, id, t0: performance.now() });
+  }
+
+  private updateSnacks(now: number): void {
+    const el = this.renderer.domElement;
+    this.snacks = this.snacks.filter((s) => {
+      const t = (now - s.t0) / 1800;
+      const at = s.id ? this.crew.get(s.id)?.root.position : this.charPos;
+      if (t >= 1 || !at) { s.el.remove(); return false; }
+      // beside the cat's body, under its speech bubble, drifting up
+      this.tmp.copy(at); this.tmp.project(this.camera);
+      const x = (this.tmp.x * 0.5 + 0.5) * el.clientWidth + 40;
+      const y = (-this.tmp.y * 0.5 + 0.5) * el.clientHeight - t * 26;
+      s.el.style.transform = `translate(-50%,-100%) translate(${x}px,${y}px)`;
+      s.el.style.opacity = String(t < 0.12 ? t / 0.12 : 1 - (t - 0.12) / 0.88);
+      return true;
+    });
+  }
+
   // ---- time of day ---------------------------------------------------------------
   /** Light the office for the given hour (default: the clock). Night turns on
       desk lamps and monitor glow; sunset paints everything warm. */
@@ -2780,6 +2811,7 @@ export class Office3D {
     const bossMoving = this.updateBoss(dt, now, el);
     const secMoving = this.updateSecretary(dt, now, el);
     this.updateReactions(dt, now);
+    this.updateSnacks(now);
     this.updateElevator(dt, now);
     this.updatePantryFx(now);
     if (crewMoving || bossMoving || secMoving) this.renderer.shadowMap.needsUpdate = true;

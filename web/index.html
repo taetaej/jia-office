@@ -19,6 +19,8 @@
           <span class="status-text" id="status-text">—</span>
           <span class="status-session" id="status-session"></span>
         </div>
+        <button type="button" class="diary-open" id="diary-open" title="냥전트들이 한 일">📒 업무일지</button>
+        <button type="button" class="diary-open" id="usage-open" title="AI 도구별 크레딧·토큰 사용량 (일별·월별)">🐟 간식비 <span class="usage-open-chip" id="usage-chip">Kiro —</span></button>
         <div class="power-toggle" id="power-toggle" role="group" aria-label="3D 화면 전원">
           <span class="power-label">3D</span>
           <button type="button" data-power="auto" title="일할 때 60fps · 쉴 때 20fps · 안 볼 때 10fps">자동</button>
@@ -55,6 +57,8 @@
             <button type="button" id="power-resume">다시 켜기</button>
           </div>
         </div>
+        <div id="diary" class="diary" hidden></div>
+        <div id="usage" class="diary" hidden></div>
         <div id="room-labels"></div>
         <div id="legend" class="legend">
           <div class="legend-head">어디서 무엇을 하나 · ROOM GUIDE</div>

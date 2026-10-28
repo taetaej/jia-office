@@ -56,12 +56,44 @@ export interface SessionInfo {
   /** where the session comes from (default: Kiro) */
   source?: Source;
 }
+/** One session's day in the 업무일지 (see watcher diary.ts). */
+export interface DiaryEntry {
+  sessionId: string;
+  source: Source;
+  name: string;
+  project?: string;
+  first: number;
+  last: number;
+  activeMs: number;
+  prompts: number;
+  acts: { read: number; write: number; run: number; test: number; web: number; plan: number };
+  files: string[];
+  tests: { pass: number; fail: number };
+  commits: number;
+  approvals: number;
+  /** 간식비 in 츄르 */
+  snack: number;
+  tokens: number;
+  credits: number;
+}
+/** Token counts by kind (see watcher types). */
+export interface UsageTokens { input: number; cacheWrite: number; cacheRead: number; output: number }
+export interface UsageDay {
+  kiro: { credits: number; churu: number };
+  claude: UsageTokens & { churu: number };
+  codex: UsageTokens & { churu: number };
+}
+export interface LimitWindow { usedPercent: number; windowMinutes: number; resetsAt: number }
+export interface CodexLimit { at: number; plan?: string; primary: LimitWindow; secondary?: LimitWindow }
+export interface UsageSessionRow { id: string; tool: Source; name: string; project?: string; day: string; amount: number }
 export type ServerFrame =
   | { v: 1; type: 'catchup'; sessionId: string; sessions: SessionInfo[]; liveSessionId: string | null; currentRoom: string; events: ActivityEvent[] }
   | { v: 1; type: 'event'; event: ActivityEvent; currentRoom: string }
   | { v: 1; type: 'sessions'; sessions: SessionInfo[]; liveSessionId: string | null }
   | { v: 1; type: 'crew'; members: CrewMember[] }
   | { v: 1; type: 'approvals'; items: Approval[] }
+  | { v: 1; type: 'diary'; day: string; days: string[]; entries: DiaryEntry[] }
+  | { v: 1; type: 'usage'; days: Record<string, UsageDay>; bySession: UsageSessionRow[]; codexLimit: CodexLimit | null }
   | { v: 1; type: 'ping'; t: number };
 
 export interface SocketHandlers {
@@ -70,6 +102,8 @@ export interface SocketHandlers {
   onSessions: (f: Extract<ServerFrame, { type: 'sessions' }>) => void;
   onCrew: (f: Extract<ServerFrame, { type: 'crew' }>) => void;
   onApprovals: (f: Extract<ServerFrame, { type: 'approvals' }>) => void;
+  onDiary: (f: Extract<ServerFrame, { type: 'diary' }>) => void;
+  onUsage: (f: Extract<ServerFrame, { type: 'usage' }>) => void;
   onStatus: (connected: boolean) => void;
 }
 
@@ -112,6 +146,8 @@ export class OfficeSocket {
         case 'sessions': this.handlers.onSessions(frame); break;
         case 'crew': this.handlers.onCrew(frame); break;
         case 'approvals': this.handlers.onApprovals(frame); break;
+        case 'diary': this.handlers.onDiary(frame); break;
+        case 'usage': this.handlers.onUsage(frame); break;
         case 'ping': this.send({ v: 1, type: 'pong', t: frame.t }); break;
       }
     };
@@ -119,6 +155,11 @@ export class OfficeSocket {
 
   selectSession(sessionId: string): void {
     this.send({ v: 1, type: 'select', sessionId });
+  }
+
+  /** Ask for another day's diary (the server streams today's on its own). */
+  requestDiary(day: string): void {
+    this.send({ v: 1, type: 'diary', day });
   }
 
   private send(obj: unknown): void {

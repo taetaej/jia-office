@@ -7,6 +7,8 @@ import { Office3D, type BubbleInfo } from './scene3d.js';
 import { AGENT_NAME, OfficeSocket, SOURCE_LABEL, type ActivityEvent, type Approval, type SessionInfo } from './socket.js';
 import { ActivityLog, CATEGORY, type Category, type LogFilter } from './activityLog.js';
 import { ApprovalAlerts, loadAlertSettings, saveAlertSettings } from './alerts.js';
+import { DiaryView, fmtChuru, todayKey as diaryToday } from './diary.js';
+import { UsageView } from './usage.js';
 
 const canvas = document.getElementById('office') as HTMLCanvasElement;
 const roomLabels = document.getElementById('room-labels')!;
@@ -175,6 +177,14 @@ function renderFloors(): void {
     where.className = 'floor-where';
     where.textContent = [s.project, relativeTime(s.lastActivity)].filter(Boolean).join(' · ');
     meta.append(src, where);
+    const ate = todaySnack.get(s.sessionId);
+    if (ate && ate >= 1) {
+      const snack = document.createElement('span');
+      snack.className = 'floor-snack';
+      snack.title = '오늘 먹은 츄르';
+      snack.textContent = `🐟 ${fmtChuru(ate)}`;
+      meta.append(snack);
+    }
     main.append(name, meta);
     li.append(main);
     if (s.sessionId === liveSessionId) {
@@ -344,6 +354,30 @@ function wireAlertToggles(): void {
   inferred.addEventListener('change', () => { alertSettings.inferred = inferred.checked; saveAlertSettings(alertSettings); applyApprovals(); });
 }
 
+// ---- 업무일지 + 간식비 ---------------------------------------------------------
+const diaryView = new DiaryView(document.getElementById('diary')!, (day) => socket.requestDiary(day));
+document.getElementById('diary-open')!.addEventListener('click', () => {
+  usageView.close();
+  if (diaryView.isOpen()) diaryView.close(); else diaryView.open();
+});
+const usageView = new UsageView(document.getElementById('usage')!, () => renderUsageChip());
+const usageChip = document.getElementById('usage-chip')!;
+document.getElementById('usage-open')!.addEventListener('click', () => {
+  diaryView.close();
+  if (usageView.isOpen()) usageView.close(); else usageView.open();
+});
+/** header chip: this month's Kiro credits against the limit */
+function renderUsageChip(): void {
+  const { used, limit } = usageView.kiroMonthShare();
+  const pct = Math.round((used / limit) * 1000) / 10;
+  usageChip.textContent = `Kiro ${pct}%`;
+  usageChip.dataset.level = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'ok';
+  usageChip.title = `이번 달 Kiro ${used.toFixed(1)} / ${limit} 크레딧`;
+}
+/** today's 츄르 per session, to badge the floor guide and spot fresh snacking */
+let todaySnack = new Map<string, number>();
+let snackSeeded = false;
+
 // ---- socket -----------------------------------------------------------------
 const socket = new OfficeSocket({
   onStatus: (ok) => {
@@ -396,6 +430,25 @@ const socket = new OfficeSocket({
   onApprovals: (f) => {
     lastApprovals = f.items;
     applyApprovals();
+  },
+  onUsage: (f) => {
+    usageView.update(f);
+    renderUsageChip();
+  },
+  onDiary: (f) => {
+    diaryView.update(f.day, f.days, f.entries);
+    if (f.day !== diaryToday()) return;
+    const next = new Map(f.entries.map((e) => [e.sessionId, e.snack]));
+    // whoever ate since the last frame gets a "+🐟" over their head
+    if (snackSeeded) {
+      for (const [id, n] of next) {
+        const ate = Math.round(n - (todaySnack.get(id) ?? 0));
+        if (ate >= 1) office.snack(id === activeSessionId ? null : id, ate);
+      }
+    }
+    snackSeeded = true;
+    todaySnack = next;
+    renderFloors();
   },
   onSessions: (f) => {
     sessions = f.sessions;

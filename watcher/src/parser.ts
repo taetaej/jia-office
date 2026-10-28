@@ -186,6 +186,8 @@ export function parseLine(
   const rawCallId = payload.toolCallId ?? payload.callId ?? payload.id;
   if (typeof rawCallId === 'string') event.callId = rawCallId.slice(0, 80);
   if (payload.type === 'tool_call') {
+    const file = sanitize(baseName(payload.args?.path ?? payload.args?.filePath ?? payload.filePath), MAX_LABEL);
+    if (file) event.file = file;
     const cmd = typeof payload.args?.command === 'string' ? payload.args.command : '';
     if (TEST_HINT.test(cmd)) event.tag = 'test';
     else if (/\bgit\s+(commit|push)\b/.test(cmd)) event.tag = 'commit';

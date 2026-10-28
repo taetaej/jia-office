@@ -48,6 +48,8 @@ export interface ActivityEvent {
   /** Notable commands, so the office can react (confetti on a green test run…).
       Set on the tool_call and copied onto its tool_result. */
   tag?: 'test' | 'commit';
+  /** tool_call: the file it touches (basename only), for the work diary. */
+  file?: string;
   /** tool_call / tool_result correlation id (opaque). */
   callId?: string;
 }
@@ -111,6 +113,53 @@ export interface Approval {
   inferred?: boolean;
 }
 
+/** One session's day in the 업무일지 (work diary). Workflow sub-agents count
+    toward their parent session. */
+export interface DiaryEntry {
+  sessionId: string;
+  source: 'kiro' | 'claude' | 'codex';
+  name: string;
+  project?: string;
+  /** first / last event of the day (epoch ms) */
+  first: number;
+  last: number;
+  /** time spent working: gaps between events, each capped at 5 minutes */
+  activeMs: number;
+  /** user requests */
+  prompts: number;
+  /** tool calls by activity category */
+  acts: { read: number; write: number; run: number; test: number; web: number; plan: number };
+  /** distinct files written (basenames, capped) */
+  files: string[];
+  tests: { pass: number; fail: number };
+  commits: number;
+  approvals: number;
+  /** 간식비 in 츄르 (see usage.ts for the exchange rate) */
+  snack: number;
+  /** the raw usage behind the snack: tokens (Claude / Codex) or credits (Kiro) */
+  tokens: number;
+  credits: number;
+}
+
+/** Token counts by kind (Codex's cached input is a cache read). */
+export interface UsageTokens { input: number; cacheWrite: number; cacheRead: number; output: number }
+
+/** One day's 간식비 per tool, in each tool's own unit (+ 츄르 for fun). */
+export interface UsageDay {
+  kiro: { credits: number; churu: number };
+  claude: UsageTokens & { churu: number };
+  codex: UsageTokens & { churu: number };
+}
+
+/** Codex's plan rate-limit windows, as last reported in a Codex log. */
+export interface CodexLimit {
+  /** when Codex reported it (epoch ms) */
+  at: number;
+  plan?: string;
+  primary: { usedPercent: number; windowMinutes: number; resetsAt: number };
+  secondary?: { usedPercent: number; windowMinutes: number; resetsAt: number };
+}
+
 /** Server -> client frames. */
 export type ServerFrame =
   | {
@@ -126,9 +175,18 @@ export type ServerFrame =
   | { v: 1; type: 'sessions'; sessions: SessionInfo[]; liveSessionId: string | null }
   | { v: 1; type: 'crew'; members: CrewMember[] }
   | { v: 1; type: 'approvals'; items: Approval[] }
+  | { v: 1; type: 'diary'; day: string; days: string[]; entries: DiaryEntry[] }
+  | {
+      v: 1;
+      type: 'usage';
+      days: Record<string, UsageDay>;
+      bySession: Array<{ id: string; tool: 'kiro' | 'claude' | 'codex'; name: string; project?: string; day: string; amount: number }>;
+      codexLimit: CodexLimit | null;
+    }
   | { v: 1; type: 'ping'; t: number };
 
 /** Client -> server frames. */
 export type ClientFrame =
   | { v: 1; type: 'select'; sessionId: string }
+  | { v: 1; type: 'diary'; day: string }
   | { v: 1; type: 'pong'; t: number };

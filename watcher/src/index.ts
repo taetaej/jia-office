@@ -24,6 +24,8 @@ import { RingBuffer } from './ringBuffer.js';
 import { RoomState } from './roomState.js';
 import { scanWorkflows } from './workflows.js';
 import { computeApprovals, computeCrew } from './crew.js';
+import { Diary, dayKey } from './diary.js';
+import { UsageMonitor } from './usage.js';
 
 const WS_PORT = clampPort(process.env.KO_WS_PORT, 8787);
 const CATCHUP_EVENTS = 400;
@@ -59,6 +61,12 @@ let crewJson = '[]';
 let approvals: Approval[] = [];
 let approvalsJson = '[]';
 let lastCrewAt = 0;
+
+const DIARY_MS = 5_000;
+const diary = new Diary(root);
+let diaryJson = '';
+const usage = new UsageMonitor(root);
+let usageJson = '';
 
 const clients = new Set<WebSocket>();
 
@@ -198,6 +206,31 @@ async function poll(): Promise<void> {
   }
 }
 
+// ---- Work diary: refreshed on its own slower loop, so a big first read never
+// holds up the live poll (or trips its stall watchdog) ------------------------
+function diaryFrame(day: string): ServerFrame {
+  return { v: 1, type: 'diary', day, days: diary.days(), entries: diary.entries(day, sessions) };
+}
+
+async function refreshDiary(): Promise<void> {
+  await diary.refresh(sessions);
+  const frame = diaryFrame(dayKey(Date.now()));
+  const json = JSON.stringify(frame);
+  if (json !== diaryJson) {
+    diaryJson = json;
+    broadcast(frame);
+  }
+}
+
+async function refreshUsage(): Promise<void> {
+  await usage.refresh();
+  const json = JSON.stringify({ v: 1, type: 'usage', ...usage.snapshot(sessions) } satisfies ServerFrame);
+  if (json !== usageJson) {
+    usageJson = json;
+    for (const ws of clients) if (ws.readyState === WebSocket.OPEN) ws.send(json);
+  }
+}
+
 // ---- WebSocket server -------------------------------------------------------
 function startServer(): void {
   const wss = new WebSocketServer({ port: WS_PORT, host: '127.0.0.1' });
@@ -207,6 +240,8 @@ function startServer(): void {
     send(ws, catchupFrame());
     send(ws, { v: 1, type: 'crew', members: crew });
     send(ws, { v: 1, type: 'approvals', items: approvals });
+    if (diaryJson) ws.send(diaryJson);
+    if (usageJson) ws.send(usageJson);
 
     ws.on('message', async (raw) => {
       let frame: ClientFrame;
@@ -219,6 +254,9 @@ function startServer(): void {
         const picked = sessions.find((x) => x.sessionId === frame.sessionId);
         await activateSession(picked?.parentId ?? frame.sessionId, true);
         send(ws, catchupFrame());
+      }
+      if (frame.type === 'diary' && typeof frame.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(frame.day)) {
+        send(ws, diaryFrame(frame.day));
       }
     });
 
@@ -257,6 +295,18 @@ async function main(): Promise<void> {
     /* chokidar is best-effort; the interval poll is authoritative */
   }
   await poll();
+  const diaryLoop = (): void => {
+    refreshDiary()
+      .catch((e) => console.error('[watcher] diary error:', e))
+      .finally(() => setTimeout(diaryLoop, DIARY_MS));
+  };
+  diaryLoop();
+  const usageLoop = (): void => {
+    refreshUsage()
+      .catch((e) => console.error('[watcher] usage error:', e))
+      .finally(() => setTimeout(usageLoop, DIARY_MS));
+  };
+  usageLoop();
   // One poll at a time; if one never finishes the office silently freezes on a
   // stale session list, so restart instead.
   let polling = false;
