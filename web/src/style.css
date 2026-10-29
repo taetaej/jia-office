@@ -746,3 +746,75 @@ body {
 .usage-table th, .usage-table td { padding: 3px 6px; text-align: right; border-bottom: 1px solid hsl(var(--panel-2)); }
 .usage-table th:first-child, .usage-table td:first-child { text-align: left; }
 @media (max-width: 900px) { .usage-cards, .usage-charts, .usage-top { grid-template-columns: 1fr; } }
+
+/* ---- 간식 코너 dressing for the usage dashboard ---- */
+.usage-card {
+  position: relative;
+  background:
+    /* faint gingham tablecloth */
+    linear-gradient(90deg, hsl(18 80% 60% / 0.05) 50%, transparent 50%) 0 0 / 28px 28px,
+    linear-gradient(hsl(18 80% 60% / 0.05) 50%, transparent 50%) 0 0 / 28px 28px,
+    hsl(40 70% 98%);
+  border-color: hsl(30 45% 84%);
+}
+.usage-card .diary-head { background: transparent; border-bottom-color: hsl(30 45% 84%); padding-top: 10px; }
+.snack-awning {
+  height: 26px; flex: none;
+  background: repeating-linear-gradient(90deg, hsl(12 72% 62%) 0 28px, hsl(40 80% 97%) 28px 56px);
+  /* scalloped edge */
+  -webkit-mask: radial-gradient(14px 10px at 14px 16px, #000 98%, transparent) 0 0 / 28px 26px repeat-x, linear-gradient(#000, #000) 0 0 / 100% 16px no-repeat;
+  mask: radial-gradient(14px 10px at 14px 16px, #000 98%, transparent) 0 0 / 28px 26px repeat-x, linear-gradient(#000, #000) 0 0 / 100% 16px no-repeat;
+}
+.snack-title { display: flex; flex-direction: column; gap: 1px; }
+.snack-title-main { font-size: 16px; font-weight: 700; color: hsl(var(--ink)); }
+.snack-title-sub { font-size: 10px; color: hsl(var(--muted)); letter-spacing: .2px; }
+.usage-card .usage-mode button.active { background: hsl(12 60% 52%); }
+
+.usage-tool, .usage-chart, .usage-top-col {
+  background: hsl(0 0% 100% / 0.85);
+  border-color: hsl(30 40% 86%);
+  border-radius: 16px;
+  box-shadow: 0 2px 0 hsl(30 40% 88%);
+}
+.usage-tool-head { gap: 6px; }
+.usage-tool-icon { font-size: 18px; line-height: 1; }
+.usage-tool-name { flex: 1; min-width: 0; }
+.usage-tool-cat { font-size: 10px; font-weight: 700; }
+.usage-hero { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+.usage-hero-nums { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.usage-hero-label { font-size: 10px; color: hsl(var(--muted)); }
+.snack-mood { font-size: 11px; font-weight: 600; color: hsl(var(--muted)); }
+.snack-mood.ok { color: hsl(152 40% 32%); }
+.snack-mood.warn { color: hsl(32 85% 34%); }
+.snack-mood.over { color: hsl(0 65% 42%); }
+
+/* the jar: lid, glass body, contents that sink as the plan is eaten */
+.snack-jar { flex: none; width: 58px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.snack-jar-lid { width: 40px; height: 9px; border-radius: 4px 4px 2px 2px; background: hsl(12 60% 58%); box-shadow: inset 0 -2px 0 hsl(12 50% 48%); }
+.snack-jar-body {
+  position: relative; width: 52px; height: 58px; overflow: hidden;
+  border: 2px solid hsl(200 25% 78%); border-top-width: 3px; border-radius: 10px 10px 16px 16px;
+  background: hsl(200 60% 97%);
+}
+.snack-jar-body::after { /* glass shine */
+  content: ''; position: absolute; left: 7px; top: 6px; width: 5px; height: 26px; border-radius: 9999px;
+  background: hsl(0 0% 100% / 0.75);
+}
+.snack-jar-fill { position: absolute; left: 0; right: 0; bottom: 0; opacity: 0.85; border-radius: 6px 6px 0 0; transition: height .4s ease; }
+.snack-jar-pct {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; color: hsl(var(--ink)); text-shadow: 0 0 3px hsl(0 0% 100%), 0 0 3px hsl(0 0% 100%);
+}
+.snack-jar-label { font-size: 9px; color: hsl(var(--muted)); }
+.snack-jar[data-level="warn"] .snack-jar-body { border-color: hsl(36 80% 62%); }
+.snack-jar[data-level="over"] .snack-jar-body { border-color: hsl(0 65% 62%); animation: jar-wobble 1.6s ease-in-out infinite; }
+@keyframes jar-wobble { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }
+.snack-plate {
+  flex: none; width: 58px; height: 58px; display: grid; place-items: center; font-size: 30px;
+  border-radius: 9999px; background: radial-gradient(circle, hsl(0 0% 100%) 55%, hsl(30 40% 90%) 56% 62%, hsl(0 0% 100%) 63%);
+  box-shadow: 0 2px 0 hsl(30 40% 86%);
+}
+.usage-top-name { font-weight: 600; }
+.usage-churu { color: hsl(25 50% 55%); }
+@media (prefers-reduced-motion: reduce) { .snack-jar[data-level="over"] .snack-jar-body { animation: none; } }
+.usage-hero .usage-big { font-size: 18px; white-space: nowrap; }

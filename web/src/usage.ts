@@ -18,6 +18,13 @@ const TOKEN_KINDS: Array<{ key: keyof UsageTokens; label: string }> = [
   { key: 'output', label: '출력' },
 ];
 const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
+/** each cat's snack of choice — purely decorative, the units stay real */
+const SNACK: Record<Source, { icon: string; name: string; face: string }> = {
+  kiro: { icon: '🍡', name: '츄르 통', face: '😸' },
+  claude: { icon: '🥫', name: '참치캔 창고', face: '😻' },
+  codex: { icon: '🍪', name: '쿠키 상자', face: '😼' },
+};
+const MEDALS = ['🥇', '🥈', '🥉'];
 
 type Frame = { days: Record<string, UsageDay>; bySession: UsageSessionRow[]; codexLimit: CodexLimit | null };
 
@@ -98,8 +105,11 @@ export class UsageView {
   constructor(private readonly root: HTMLElement, private readonly onChange: () => void) {
     root.textContent = '';
     const card = el('div', 'usage-card');
+    card.append(el('div', 'snack-awning'));
     const head = el('div', 'diary-head');
-    head.append(el('div', 'diary-title', '🐟 간식비 · AI 사용량'));
+    const title = el('div', 'snack-title');
+    title.append(el('span', 'snack-title-main', '🐟 냥전트 간식 코너'), el('span', 'snack-title-sub', 'AI 도구별 크레딧 · 토큰 장부'));
+    head.append(title);
     const seg = el('div', 'usage-mode');
     this.modeBtns = (['day', 'month'] as const).map((m) => {
       const b = el('button', '', m === 'day' ? '일별' : '월별');
@@ -168,7 +178,7 @@ export class UsageView {
     const today = todayKey();
     const month = this.mode === 'month' ? this.month : this.day.slice(0, 7);
     const [y, m] = month.split('-').map(Number);
-    if (this.mode === 'month') this.label.textContent = `${y}년 ${m}월${month === today.slice(0, 7) ? ' · 이번 달' : ''}`;
+    if (this.mode === 'month') this.label.textContent = `${y}년 ${m}월${month === today.slice(0, 7) ? ' · 이번 달' : ''} 장부`;
     else {
       const [, , d] = this.day.split('-').map(Number);
       this.label.textContent = `${m}월 ${d}일 (${WEEKDAY[new Date(y, m - 1, d).getDay()]})${this.day === today ? ' · 오늘' : ''}`;
@@ -190,19 +200,30 @@ export class UsageView {
 
   private card(tool: Source, period: string[], month: string, monthDays: string[]): HTMLElement {
     const c = el('div', `usage-tool ${tool}`);
+    const snack = SNACK[tool];
     const head = el('div', 'usage-tool-head');
     const swatch = el('span', 'usage-swatch');
     swatch.style.background = TOOL_COLOR[tool];
-    head.append(swatch, el('span', 'usage-tool-name', SOURCE_LABEL[tool]), el('span', 'usage-tool-cat', AGENT_NAME[tool]));
+    head.append(el('span', 'usage-tool-icon', snack.icon), el('span', 'usage-tool-name', `${AGENT_NAME[tool]}의 ${snack.name}`), swatch, el('span', 'usage-tool-cat', SOURCE_LABEL[tool]));
     c.append(head);
 
     const sum = period.reduce((a, d) => a + amountOf(tool, this.data.days[d]), 0);
-    c.append(el('div', 'usage-big', fmtAmount(tool, sum)));
     const isThisMonth = month === todayKey().slice(0, 7);
+    // the jar shows what's left of the plan; Claude logs no limit, so it gets a plate
+    const share = tool === 'kiro' ? this.sumMonth('kiro', month) / this.kiroLimit
+      : tool === 'codex' && this.data.codexLimit ? this.data.codexLimit.primary.usedPercent / 100 : null;
+    const hero = el('div', 'usage-hero');
+    hero.append(share == null ? el('div', 'snack-plate', snack.face) : this.jar(share, tool));
+    const nums = el('div', 'usage-hero-nums');
+    nums.append(el('div', 'usage-hero-label', this.mode === 'month' ? '이번 장부에 먹은 양' : '그날 먹은 양'), el('div', 'usage-big', fmtAmount(tool, sum)));
+    if (share != null) nums.append(el('div', `snack-mood ${share >= 1 ? 'over' : share >= 0.8 ? 'warn' : 'ok'}`, share >= 1 ? '⛔ 간식 통이 텅 비었어요' : share >= 0.8 ? '⚠️ 간식이 거의 바닥났어요' : '😺 아직 넉넉해요'));
+    else nums.append(el('div', 'snack-mood', '한도 정보 없이 먹은 만큼만 기록해요'));
+    hero.append(nums);
+    c.append(hero);
 
     if (tool === 'kiro') {
       const used = this.sumMonth('kiro', month);
-      c.append(this.gauge(used / this.kiroLimit, `월 ${this.kiroLimit.toLocaleString('ko-KR')} 중 ${Math.round((used / this.kiroLimit) * 1000) / 10}%${this.mode === 'day' ? ` (이번 달 누적 ${fmtCredits(used)})` : ''}`));
+      c.append(el('div', 'usage-gauge-text', `월 ${this.kiroLimit.toLocaleString('ko-KR')} 크레딧 중 ${Math.round((used / this.kiroLimit) * 1000) / 10}% 먹음${this.mode === 'day' ? ` (이번 달 누적 ${fmtCredits(used)})` : ''}`));
       if (this.mode === 'month') {
         const elapsed = isThisMonth ? new Date().getDate() : monthDays.length;
         const avg = used / elapsed;
@@ -246,8 +267,23 @@ export class UsageView {
       }
     }
     const churu = period.reduce((a, d) => a + (this.data.days[d]?.[tool].churu ?? 0), 0);
-    c.append(el('div', 'usage-churu', `🐟 츄르로는 약 ${Math.round(churu).toLocaleString('ko-KR')}개`));
+    c.append(el('div', 'usage-churu', `🐟 츄르로 치면 약 ${Math.round(churu).toLocaleString('ko-KR')}개`));
     return c;
+  }
+
+  /** A snack jar that empties as the plan is used up. */
+  private jar(share: number, tool: Source): HTMLElement {
+    const left = Math.max(0, 1 - share);
+    const j = el('div', 'snack-jar');
+    j.dataset.level = share >= 1 ? 'over' : share >= 0.8 ? 'warn' : 'ok';
+    j.title = `남은 간식 ${Math.round(left * 1000) / 10}%`;
+    const body = el('div', 'snack-jar-body');
+    const fill = el('span', 'snack-jar-fill');
+    fill.style.height = `${left * 100}%`;
+    fill.style.background = TOOL_COLOR[tool];
+    body.append(fill, el('span', 'snack-jar-pct', `${Math.round(left * 100)}%`));
+    j.append(el('div', 'snack-jar-lid'), body, el('div', 'snack-jar-label', '남은 간식'));
+    return j;
   }
 
   private gauge(share: number, text: string): HTMLElement {
@@ -280,7 +316,7 @@ export class UsageView {
   /** One tool's daily bars across the month — its own unit, its own axis. */
   private chart(tool: Source, monthDays: string[]): HTMLElement {
     const box = el('div', 'usage-chart');
-    box.append(el('div', 'usage-chart-title', `${SOURCE_LABEL[tool]} · 일별 ${tool === 'kiro' ? '크레딧' : '토큰'}`));
+    box.append(el('div', 'usage-chart-title', `${SNACK[tool].icon} ${AGENT_NAME[tool]}이 날마다 먹은 양 · ${tool === 'kiro' ? '크레딧' : '토큰'}`));
     const values = monthDays.map((d) => amountOf(tool, this.data.days[d]));
     const max = niceMax(Math.max(...values));
     const plot = el('div', 'usage-plot');
@@ -338,18 +374,18 @@ export class UsageView {
       }
       const rows = [...sums.values()].sort((a, b) => b.amount - a.amount).slice(0, 5);
       const col = el('div', 'usage-top-col');
-      col.append(el('div', 'usage-chart-title', `${SOURCE_LABEL[tool]} · 많이 먹은 세션`));
-      if (!rows.length) col.append(el('div', 'usage-facts', '기록 없음'));
+      col.append(el('div', 'usage-chart-title', `${SNACK[tool].icon} ${SOURCE_LABEL[tool]} 먹보 랭킹`));
+      if (!rows.length) col.append(el('div', 'usage-facts', '아무도 안 먹었어요 💤'));
       const max = rows[0]?.amount || 1;
-      for (const r of rows) {
+      rows.forEach((r, i) => {
         const row = el('div', 'usage-top-row');
         row.title = [r.name, r.project].filter(Boolean).join(' · ');
         const bar = el('span', 'usage-top-bar');
         bar.style.width = `${(r.amount / max) * 100}%`;
         bar.style.background = TOOL_COLOR[tool];
-        row.append(el('span', 'usage-top-name', r.name), el('span', 'usage-top-value', fmtAmount(tool, r.amount)), bar);
+        row.append(el('span', 'usage-top-name', `${MEDALS[i] ?? `${i + 1}.`} ${r.name}`), el('span', 'usage-top-value', fmtAmount(tool, r.amount)), bar);
         col.append(row);
-      }
+      });
       box.append(col);
     }
     return box;
@@ -358,7 +394,7 @@ export class UsageView {
   /** The same numbers as a table (accessibility / copy-paste). */
   private table(monthDays: string[]): HTMLElement {
     const det = el('details', 'usage-table');
-    det.append(el('summary', '', '📋 표로 보기'));
+    det.append(el('summary', '', '📋 간식 장부 표로 보기'));
     const t = el('table');
     const head = el('tr');
     for (const h of ['날짜', 'Kiro 크레딧', 'Claude 토큰', 'Codex 토큰']) head.append(el('th', '', h));
