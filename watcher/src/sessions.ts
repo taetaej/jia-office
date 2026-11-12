@@ -72,6 +72,18 @@ export async function discoverSessions(): Promise<SessionInfo[]> {
   return out;
 }
 
+/** Small JSON files (session.json, workflow state) rarely change between polls:
+    re-read one only when its mtime or size moves. Throws like readFile/parse. */
+const jsonCache = new Map<string, { mtime: number; size: number; value: unknown }>();
+async function readJsonCached(path: string): Promise<unknown> {
+  const st = await fsp.stat(path);
+  const hit = jsonCache.get(path);
+  if (hit && hit.mtime === st.mtimeMs && hit.size === st.size) return hit.value;
+  const value = JSON.parse(await fsp.readFile(path, 'utf8')) as unknown;
+  jsonCache.set(path, { mtime: st.mtimeMs, size: st.size, value });
+  return value;
+}
+
 /** Workflow sub-agent sessions of one project dir: session id → parent + step.
     Kiro stores every workflow step as its own sess_* folder; the workflow's
     sessions.json lists them and workflow-state.json names the parent session. */
@@ -88,8 +100,8 @@ async function workflowSessions(hashDir: string): Promise<Map<string, Pick<Sessi
   for (const wf of wfDirs) {
     try {
       const dir = join(hashDir, 'workflows', wf);
-      const state = JSON.parse(await fsp.readFile(join(dir, 'workflow-state.json'), 'utf8')) as { parentSessionId?: unknown; workflowName?: unknown };
-      const list = JSON.parse(await fsp.readFile(join(dir, 'sessions.json'), 'utf8')) as { sessions?: Array<{ sessionId?: unknown; nodeId?: unknown }> };
+      const state = (await readJsonCached(join(dir, 'workflow-state.json'))) as { parentSessionId?: unknown; workflowName?: unknown };
+      const list = (await readJsonCached(join(dir, 'sessions.json'))) as { sessions?: Array<{ sessionId?: unknown; nodeId?: unknown }> };
       const parentId = typeof state.parentSessionId === 'string' ? state.parentSessionId : undefined;
       const workflow = typeof state.workflowName === 'string' ? state.workflowName.slice(0, 60) : wf;
       for (const s of list.sessions ?? []) {
@@ -106,8 +118,7 @@ async function workflowSessions(hashDir: string): Promise<Map<string, Pick<Sessi
 /** Title and project folder from a Kiro session.json. */
 async function readMeta(sessionJsonPath: string, fallbackHash: string): Promise<{ name: string; project?: string }> {
   try {
-    const raw = await fsp.readFile(sessionJsonPath, 'utf8');
-    const obj = JSON.parse(raw) as { title?: unknown; workspacePaths?: unknown };
+    const obj = (await readJsonCached(sessionJsonPath)) as { title?: unknown; workspacePaths?: unknown };
     const ws = Array.isArray(obj.workspacePaths) && typeof obj.workspacePaths[0] === 'string' ? obj.workspacePaths[0] : '';
     const project = ws ? basename(ws).slice(0, 40) : undefined;
     const name = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim().slice(0, 60) : `session ${fallbackHash.slice(0, 6)}`;

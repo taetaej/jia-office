@@ -56,6 +56,9 @@ const workflowSeen = new Map<string, string>();
 /** tool_call tags by call id, so the matching tool_result carries them too. */
 const callTags = new Map<string, NonNullable<ActivityEvent['tag']>>();
 const CREW_MS = 1500;
+/** The session list changes rarely; only the watched session needs the fast poll. */
+const DISCOVER_MS = 3000;
+let lastDiscoverAt = 0;
 let crew: CrewMember[] = [];
 let crewJson = '[]';
 let approvals: Approval[] = [];
@@ -152,14 +155,18 @@ function catchupFrame(): ServerFrame {
   };
 }
 
-// ---- Polling loop: refresh session list, tail active, scan workflows --------
+// ---- Polling loop: tail the active session every tick; the session list,
+// workflows, crew and approvals on slower beats --------------------------------
 async function poll(): Promise<void> {
-  const fresh = await discoverSessions();
   const prevLive = liveSessionId;
   const prevTop = topLevel().length;
-  sessions = fresh;
-  // only top-level sessions are "live"; a running workflow keeps its parent live
-  liveSessionId = topLevel()[0]?.sessionId ?? null;
+  if (Date.now() - lastDiscoverAt > DISCOVER_MS) {
+    lastDiscoverAt = Date.now();
+    sessions = await discoverSessions();
+    // only top-level sessions are "live"; a running workflow keeps its parent live
+    liveSessionId = topLevel()[0]?.sessionId ?? null;
+  }
+  const slow = Date.now() - lastCrewAt > CREW_MS;
 
   // Auto-pick the live session on first run.
   if (activeSessionId == null && liveSessionId) {
@@ -173,7 +180,7 @@ async function poll(): Promise<void> {
     for (const line of lines) ingest(line, activeSessionId, true);
 
     // Surface workflow changes for the active session's hash (log-only).
-    const info = sessions.find((s) => s.sessionId === activeSessionId);
+    const info = slow ? sessions.find((s) => s.sessionId === activeSessionId) : undefined;
     if (info) {
       const wfEvents = await scanWorkflows(root, info.hash, activeSessionId, workflowSeen);
       for (const ev of wfEvents) {
@@ -184,7 +191,7 @@ async function poll(): Promise<void> {
   }
 
   // Everyone else in the office (workflow sub-agents, other sessions).
-  if (Date.now() - lastCrewAt > CREW_MS) {
+  if (slow) {
     lastCrewAt = Date.now();
     crew = await computeCrew(root, sessions, activeSessionId);
     const json = JSON.stringify(crew);
