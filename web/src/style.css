@@ -759,3 +759,22 @@ body {
   border: 1.5px solid hsl(var(--faint)); border-top-width: 3px; border-radius: 2px 2px 4px 4px;
 }
 .mini-jar span { position: absolute; left: 0; right: 0; bottom: 0; opacity: 0.75; }
+
+/* the cats' faces + their one-line comment */
+.cat-face { flex: none; display: block; }
+.cat-face .cat-ear { transition: transform .5s cubic-bezier(.3, 1.4, .5, 1); }
+.cat-face .cat-ear.left { transform-origin: 9px 13px; }
+.cat-face .cat-ear.right { transform-origin: 23px 13px; }
+.cat-face.worried .cat-ear.left { transform: rotate(-32deg) translate(-1px, 2px); }
+.cat-face.worried .cat-ear.right { transform: rotate(32deg) translate(1px, 2px); }
+.usage-say { display: flex; align-items: center; gap: 10px; }
+.usage-say-text {
+  position: relative; font-size: 12px; font-weight: 600; color: hsl(var(--fg));
+  padding: 7px 12px; border-radius: 12px; background: hsl(var(--panel-2) / 0.8);
+}
+.usage-say-text::before { /* bubble tail toward the cat */
+  content: ''; position: absolute; left: -5px; top: 50%; margin-top: -5px;
+  border: 5px solid transparent; border-left: 0; border-right-color: hsl(var(--panel-2) / 0.8);
+}
+.usage-tile-head .usage-swatch { margin-left: 2px; }
+.usage-tile-head .mini-jar { margin-left: auto; }

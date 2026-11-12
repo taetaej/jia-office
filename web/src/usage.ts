@@ -4,6 +4,7 @@
 // Data comes from the watcher's `usage` frame; strings in it are untrusted →
 // textContent only.
 
+import { catFace } from './catFace.js';
 import { AGENT_NAME, SOURCE_LABEL, type CodexLimit, type Source, type UsageDay, type UsageSessionRow, type UsageTokens } from './socket.js';
 
 const LIMIT_KEY = 'ko.kiro.limit';
@@ -18,8 +19,6 @@ const TOKEN_KINDS: Array<{ key: keyof UsageTokens; label: string }> = [
   { key: 'output', label: '출력' },
 ];
 const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
-/** each cat's snack — only an icon on the tile, the units stay real */
-const SNACK: Record<Source, string> = { kiro: '🍡', claude: '🥫', codex: '🍪' };
 const NOTE = 'Kiro 크레딧은 턴별 사용량, Claude Code·Codex 토큰은 API 사용량을 그대로 더한 값이에요. Kiro 한도는 달력 월 기준이라 실제 청구 주기와 다를 수 있어요. Claude Code는 기본 30일이 지난 기록을 지워서 그 이전은 비어 보일 수 있어요.';
 
 type Frame = { days: Record<string, UsageDay>; bySession: UsageSessionRow[]; codexLimit: CodexLimit | null };
@@ -99,6 +98,9 @@ export class UsageView {
   private readonly modeBtns: HTMLButtonElement[];
   private readonly settings: HTMLElement;
   private readonly tip: HTMLElement;
+  /** things to animate once the freshly opened view is on screen */
+  private intro: Array<(t: number) => void> = [];
+  private outro: Array<() => void> = [];
 
   constructor(private readonly root: HTMLElement, private readonly onChange: () => void) {
     root.textContent = '';
@@ -141,7 +143,7 @@ export class UsageView {
   }
 
   isOpen(): boolean { return !this.root.hidden; }
-  open(): void { this.root.hidden = false; this.render(); }
+  open(): void { this.root.hidden = false; this.render(true); }
   close(): void { this.root.hidden = true; this.tip.hidden = true; this.settings.hidden = true; }
 
   update(f: Frame): void {
@@ -191,7 +193,9 @@ export class UsageView {
     return days.reduce((a, d) => a + (this.data.days[d]?.[tool].churu ?? 0), 0);
   }
 
-  private render(): void {
+  private render(animate = false): void {
+    this.intro = [];
+    this.outro = [];
     for (const b of this.modeBtns) b.classList.toggle('active', b.dataset.mode === this.mode);
     const today = todayKey();
     const month = this.mode === 'month' ? this.month : this.day.slice(0, 7);
@@ -207,7 +211,69 @@ export class UsageView {
     this.body.textContent = '';
     const tiles = el('div', 'usage-tiles');
     for (const tool of TOOLS) tiles.append(this.tile(tool, period, monthDays));
-    this.body.append(tiles, this.detail(this.tool, period, monthDays));
+    this.body.append(this.say(period, monthDays), tiles, this.detail(this.tool, period, monthDays));
+    this.play(animate && !matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  /** Opening: numbers count up, meters and jars fill, then worried ears droop. */
+  private play(animate: boolean): void {
+    if (!animate) {
+      for (const f of this.intro) f(1);
+      for (const f of this.outro) f();
+      return;
+    }
+    for (const f of this.intro) f(0);
+    const t0 = performance.now();
+    const tick = (now: number): void => {
+      const t = Math.min(1, (now - t0) / 700);
+      const e = 1 - (1 - t) ** 3;
+      for (const f of this.intro) f(e);
+      if (t < 1) requestAnimationFrame(tick);
+      else setTimeout(() => { for (const f of this.outro) f(); }, 150);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /** A number that counts up on open. */
+  private counter(value: number, fmt: (n: number) => string): HTMLElement {
+    const e = el('span', 'usage-num', fmt(value));
+    this.intro.push((t) => { e.textContent = fmt(value * t); });
+    return e;
+  }
+  /** A fill (meter width / jar height) that grows on open. */
+  private grow(e: HTMLElement, prop: 'width' | 'height', pct: number): void {
+    this.intro.push((t) => { e.style[prop] = `${pct * t}%`; });
+  }
+
+  /** One line in a cat's voice: who ate the most, and whether a jar is running low. */
+  private say(period: string[], monthDays: string[]): HTMLElement {
+    const box = el('div', 'usage-say');
+    const churu = TOOLS.map((tool) => ({ tool, n: this.churuOf(tool, period) })).sort((a, b) => b.n - a.n);
+    const top = churu[0].n >= 1 ? churu[0].tool : null;
+    const josa = (name: string) => `${name}이`;
+    const parts: string[] = [];
+    const share = this.sumDays('kiro', monthDays) / this.kiroLimit;
+    const isThisMonth = monthDays[0].slice(0, 7) === todayKey().slice(0, 7);
+    if (this.mode === 'month') {
+      if (!top) parts.push(`${isThisMonth ? '이번 달은 아직' : '이 달은'} 아무도 안 먹었어요 😺`);
+      else parts.push(`${isThisMonth ? '이번 달은' : '이 달은'} ${josa(AGENT_NAME[top])} 제일 많이 먹었어요.`);
+    } else {
+      const day = churu.reduce((a, c) => a + c.n, 0);
+      const elapsed = isThisMonth ? new Date().getDate() : monthDays.length;
+      const avg = TOOLS.reduce((a, tool) => a + this.churuOf(tool, monthDays), 0) / Math.max(1, elapsed);
+      if (day < 1) parts.push('이날은 다들 쉬었어요 😴');
+      else {
+        parts.push(day > avg * 1.5 ? '평소보다 많이 먹은 날이에요 🍽️' : day < avg * 0.5 ? '다들 소식한 날이에요 😺' : '평소만큼 먹었어요 😺');
+        if (top) parts.push(`${josa(AGENT_NAME[top])} 제일 많이 먹었고요.`);
+      }
+    }
+    if (isThisMonth || this.mode === 'month') {
+      if (share >= 1) parts.push('에이전트냥 츄르 통은 이미 텅 비었어요 🙀');
+      else if (share >= 0.8) parts.push(`에이전트냥 츄르 통이 거의 비었어요 🙀 (남은 ${fmtCredits(this.kiroLimit - this.sumDays('kiro', monthDays))})`);
+    }
+    const who = share >= 0.8 ? 'kiro' : top ?? 'kiro';
+    box.append(catFace(who, share >= 0.8, 26), el('span', 'usage-say-text', parts.join(' ')));
+    return box;
   }
 
   /** One tool at a glance: a big number and one status line. */
@@ -219,8 +285,10 @@ export class UsageView {
     const head = el('div', 'usage-tile-head');
     const swatch = el('span', 'usage-swatch');
     swatch.style.background = TOOL_COLOR[tool];
-    head.append(swatch, el('span', 'usage-tile-name', `${SNACK[tool]} ${AGENT_NAME[tool]} · ${SOURCE_LABEL[tool]}`));
+    const face = catFace(tool);
+    head.append(face, el('span', 'usage-tile-name', `${AGENT_NAME[tool]} · ${SOURCE_LABEL[tool]}`), swatch);
     t.append(head);
+    const worry = (on: boolean) => { if (on) this.outro.push(() => face.classList.add('worried')); };
 
     const sum = this.sumDays(tool, period);
     const big = el('div', 'usage-tile-big');
@@ -228,16 +296,17 @@ export class UsageView {
     const isMonth = this.mode === 'month';
     if (tool === 'kiro') {
       const used = this.sumDays('kiro', monthDays);
-      big.append(el('span', 'usage-num', (isMonth ? used : sum).toLocaleString('ko-KR', { maximumFractionDigits: 1 })),
+      big.append(this.counter(isMonth ? used : sum, (n) => n.toLocaleString('ko-KR', { maximumFractionDigits: 1, minimumFractionDigits: 1 })),
         el('span', 'usage-unit', isMonth ? ` / ${this.kiroLimit.toLocaleString('ko-KR')} 크레딧` : ' 크레딧'));
       t.append(big);
       const share = used / this.kiroLimit;
       const level = share >= 1 ? 'over' : share >= 0.8 ? 'warn' : 'ok';
-      head.append(miniJar(1 - share, TOOL_COLOR[tool]));
+      head.append(this.jar(1 - share, TOOL_COLOR[tool]));
+      worry(share >= 0.8);
       const bar = el('div', 'usage-meter');
       bar.dataset.level = level;
       const fill = el('span');
-      fill.style.width = `${Math.min(100, share * 100)}%`;
+      this.grow(fill, 'width', Math.min(100, share * 100));
       bar.append(fill);
       t.append(bar);
       const pct = `${Math.round(share * 1000) / 10}%`;
@@ -246,18 +315,19 @@ export class UsageView {
         ? `${level === 'over' ? '⛔ 한도 초과' : level === 'warn' ? '⚠️ 거의 다 먹었어요' : '넉넉해요'} · ${pct}${left > 0 ? ` · 남은 ${fmtCredits(left)}` : ''}`
         : `이번 달 ${fmtCredits(used)} · ${pct}`));
     } else {
-      const [num, unit] = splitAmount(fmtTokens(sum));
-      big.append(el('span', 'usage-num', num), el('span', 'usage-unit', unit));
+      const unit = splitAmount(fmtTokens(sum))[1];
+      big.append(this.counter(sum, (n) => splitAmount(fmtTokens(n))[0]), el('span', 'usage-unit', unit));
       t.append(big);
       const lim = tool === 'codex' ? this.data.codexLimit : null;
       if (lim) {
         const r = new Date(lim.primary.resetsAt);
         const level = lim.primary.usedPercent >= 100 ? 'over' : lim.primary.usedPercent >= 80 ? 'warn' : 'ok';
-        head.append(miniJar(1 - lim.primary.usedPercent / 100, TOOL_COLOR[tool]));
+        head.append(this.jar(1 - lim.primary.usedPercent / 100, TOOL_COLOR[tool]));
+        worry(lim.primary.usedPercent >= 80);
         const bar = el('div', 'usage-meter');
         bar.dataset.level = level;
         const fill = el('span');
-        fill.style.width = `${Math.min(100, lim.primary.usedPercent)}%`;
+        this.grow(fill, 'width', Math.min(100, lim.primary.usedPercent));
         bar.append(fill);
         t.append(bar, el('div', `usage-status ${level}`, `플랜 한도 ${lim.primary.usedPercent}% · ${r.getMonth() + 1}/${r.getDate()} 리셋`));
       } else {
@@ -269,6 +339,17 @@ export class UsageView {
       }
     }
     return t;
+  }
+
+  /** A tiny snack jar in the tile corner: how much of the plan is left. */
+  private jar(left: number, color: string): HTMLElement {
+    const j = el('span', 'mini-jar');
+    j.title = `남은 간식 ${Math.max(0, Math.round(left * 1000) / 10)}%`;
+    const fill = el('span');
+    fill.style.background = color;
+    this.grow(fill, 'height', Math.max(0, Math.min(1, left)) * 100);
+    j.append(fill);
+    return j;
   }
 
   /** The selected tool: its facts line, daily chart and top sessions. */
@@ -391,17 +472,6 @@ export class UsageView {
     det.append(t);
     return det;
   }
-}
-
-/** A tiny snack jar in the tile corner: how much of the plan is left. */
-function miniJar(left: number, color: string): HTMLElement {
-  const j = el('span', 'mini-jar');
-  j.title = `남은 간식 ${Math.max(0, Math.round(left * 1000) / 10)}%`;
-  const fill = el('span');
-  fill.style.height = `${Math.max(0, Math.min(1, left)) * 100}%`;
-  fill.style.background = color;
-  j.append(fill);
-  return j;
 }
 
 /** "2.8억 토큰" → ["2.8억", " 토큰"] so the number can be set large */
