@@ -67,6 +67,9 @@ function overlaps(a: Footprint, b: Footprint): boolean {
 }
 
 const zoneById = (id: string): ZoneDef | undefined => ZONES.find((z) => z.id === id);
+/** Minimum gap between shadow-map redraws while something moves (≈ 8 per second). */
+const SHADOW_MS = 125;
+
 const zoneForRoom = (room: string): ZoneDef | undefined => ZONES.find((z) => z.room === room);
 
 /** Procedural pieces and their heights (for `on:` stacking + checks). */
@@ -2814,7 +2817,7 @@ export class Office3D {
     this.updateSnacks(now);
     this.updateElevator(dt, now);
     this.updatePantryFx(now);
-    if (crewMoving || bossMoving || secMoving) this.renderer.shadowMap.needsUpdate = true;
+    if (crewMoving || bossMoving || secMoving) this.shadowDirty = true;
   }
 
   // ---- camera framing ---------------------------------------------------------
@@ -2897,7 +2900,7 @@ export class Office3D {
     }
 
     // boss cat's day on the bed: nap → stretch → groom → 꾹꾹이 → 뒹굴뒹굴 → 식빵
-    if (moved || this.wasMoving) this.renderer.shadowMap.needsUpdate = true;
+    if (moved || this.wasMoving) this.shadowDirty = true;
     this.wasMoving = moved;
 
     const t = Math.floor(now / 400);
@@ -2934,9 +2937,18 @@ export class Office3D {
     this.agentHud.place(this.hudX, this.hudY);
     this.renderExtras(dt, now, el);
 
+    // Redrawing the shadow map re-renders every caster (~1,250 meshes), so while
+    // cats walk it is refreshed at most SHADOW_MS apart; the last move still lands.
+    if (this.shadowDirty && now - this.lastShadowAt >= SHADOW_MS) {
+      this.renderer.shadowMap.needsUpdate = true;
+      this.shadowDirty = false;
+      this.lastShadowAt = now;
+    }
     this.composer.render();
   }
   private wasMoving = false;
+  private shadowDirty = false;
+  private lastShadowAt = 0;
 
   /** Dev-only: fraction of canvas WIDTH the floor's projected bbox spans. */
   debugFloorWidthFraction(): number {
